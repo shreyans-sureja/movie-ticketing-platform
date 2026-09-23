@@ -35,3 +35,37 @@
 ## Prompt 5
 
 > Design looks good, implement it. update all related documentations as well.
+
+## Prompt 6
+
+> It looks good, let's implemented admin management flow.
+>
+> For simplicity, add top 50 cities in India using flyway in city table. Admin should be able to select cities from that list only. Provide read only apis to admin users.
+>
+> Theatre admin should be able to create a theatre using the cityId, add auditoriam in that and add physical seats in that. Only the admin who owns the theatre and its data should be able to modify the data.
+>
+> create this design document in new file and do not code yet.
+
+## Prompt 7
+
+> I want you to modify plan.
+>
+> - Theatre_admin is the new role, please keep the consistancy with roles using admin and customer as previously we have added.
+> - City you should ingest using the flyway for now but we do not need unnecessary census, slug etc data, remove and keep related information only.
+> - resource related urls should not have admin in urls, protect operations using sprint security and jwt verification.
+> - admin should create and list owned theatres, list owned auditorium, create physical seats, list physical seat, etc.
+> - remove update apis, deactivation apis for now, put it in out of scope. our core focus right now is concurrency booking correctness.
+> - Do not persist derived attributes like seatLabel, store only row lebel and seatnumber, generate and send in api response.
+> - ACCESSIBLE is not a seat tier, seat can be PREMIUM and ACCESSIBLE both, leave it for now, we will add it via some flag later.
+> - weekend pricing should not be part of physical seat model, it will be part of show pricing, we will implement it later.
+> - modify seat row endpoint, it can accept row lable, first seat number, seat count and tier, then create seat automatically for that row.
+>
+> modify design doc and do not implement yet.
+
+## Prompt 8
+
+> city should be public api, can be accessible by customer as well.  fix it in plan and other thinks look good implement it.
+
+## Prompt 9
+
+> please create collection folder inside doc and add json collection which is postman import friendly for all the apis you have created and also for future apis. update agents.md for the same.
