@@ -43,7 +43,9 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/admins/signup",
                                 "/api/v1/auth/signin"
                         ).permitAll()
-                        .requestMatchers("/api/v1/admin/**").hasRole("THEATRE_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/cities", "/api/v1/cities/**").permitAll()
+                        .requestMatchers("/api/v1/theatres", "/api/v1/theatres/**")
+                        .hasRole("THEATRE_ADMIN")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(resourceServer -> resourceServer

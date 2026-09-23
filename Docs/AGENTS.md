@@ -28,6 +28,14 @@ Follow these instructions for all work in this repository unless the user explic
 - Preserve unrelated user changes in the repository.
 - Keep changes small and focused on the current requested step.
 
+## API collection
+
+- Keep an import-ready Postman Collection v2.1 JSON file under `Docs/collection/`.
+- Add or update collection requests whenever an API contract is implemented or changed.
+- Keep paths, methods, authentication, example bodies, and collection variables aligned with the implemented behavior and README.
+- Use collection variables for the base URL, credentials, tokens, and generated resource IDs; never store real secrets or credentials.
+- Future, unimplemented capabilities may appear only as clearly labeled empty placeholder folders. Do not invent request contracts before their designs are approved.
+
 ## Quality baseline
 
 - Use clear names and straightforward code.
@@ -46,4 +54,3 @@ Unless the user changes the scope, do not add:
 - Microservices or distributed-system infrastructure.
 - Advanced authentication such as OAuth, SSO, or MFA.
 - Production-grade observability, monitoring, or alerting.
-

@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class JwtAccessTokenIssuerTest {
 
-    private static final Instant NOW = Instant.parse("2026-09-22T10:00:00Z");
+    private static final Instant NOW = Instant.now();
     private static final byte[] SECRET = "0123456789abcdef0123456789abcdef".getBytes();
 
     @Test
@@ -58,4 +58,3 @@ class JwtAccessTokenIssuerTest {
         assertThat(issued.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(15)));
     }
 }
-
