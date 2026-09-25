@@ -112,3 +112,21 @@
 > 3. I see documentation is still outdated for show design movie_show flow
 > 4. add maven wrapper and update readme to use ./mvnw
 > 5. add skills_used.md. Added used skills in that if no specified skills were used mention that.
+
+## Prompt 14
+
+> let's design customer seat hold flow, do not implement it yet.
+>
+> customer should be able to temporary hold the one or more seats for the show. No partial holding should be allowed. It should be safe when multiple customer requests same seat, reject one in concurrent requsts. Hold should be expire in some threshold time which should be part of config.
+>
+> Use postgres transcation locking for the above feature, use query combination of available and holding expires rather than relaying on cron for it. Also add the explanation on readme.
+>
+> Update related documents as well
+
+## Prompt 15
+
+> implement this plan
+
+## Prompt 16
+
+> please continue

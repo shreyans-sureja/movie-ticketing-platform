@@ -2,7 +2,7 @@
 
 A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
 
-The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, and show-specific seat inventory are implemented. Holds, bookings, payments, refunds, and notifications remain future work.
+The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, and temporary customer seat holds are implemented. Bookings, payments, refunds, and notifications remain future work.
 
 ## Implemented scope
 
@@ -34,9 +34,23 @@ The current implementation provides:
 - Public upcoming-show search by city, movie, and an `Asia/Kolkata` customer date.
 - One aggregate show-search query returns show details, minimum/maximum price, and available-seat count without per-show queries.
 - Public show detail and show-seat availability APIs using `showSeatId` and response-only derived seat labels.
+- All-or-nothing customer holds for one or more show seats.
+- PostgreSQL row locking that permits only one winner for overlapping concurrent hold requests.
+- Configurable hold duration and query-driven lazy expiry without a cron job.
+- Customer-owned hold detail and expiry-aware show-seat/show-search availability.
 - UTC timestamp storage and an injected UTC `Clock` for application time.
 
-Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Future holds and bookings will operate on the implemented show-specific seat inventory rather than the physical-seat layout.
+Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Holds operate on show-specific seat inventory, and future bookings will do the same rather than using the physical-seat layout.
+
+## Customer seat holds
+
+An authenticated customer can request a temporary hold on one or more `showSeatId` values for a single show. The operation is all-or-nothing: if any requested seat is not available, no requested seat is held.
+
+The concurrency boundary is the requested set of PostgreSQL `show_seat` rows. A transaction locks the complete set in stable UUID order, evaluates every seat, and only then creates one hold and assigns every seat. Concurrent requests that overlap on a seat serialize at that row; after the first transaction commits, the losing request observes the active hold and is rejected in full. No JVM-local lock is used.
+
+Hold duration is external configuration and all expiry calculations use the injected UTC `Clock`. Expiry is lazy and query-driven: a seat is effectively available when it is stored as `AVAILABLE`, or when it is stored as `HELD` and its current hold has expired. Public seat reads and aggregate show-search availability counts use this combined condition. A cron job or scheduled expiry worker is not required for correctness.
+
+Expired holds remain readable as `EXPIRED`, while their seats can be acquired by a new hold. Historical hold items are retained and the current hold pointer on each show seat is replaced transactionally. See the [customer seat hold design](Docs/designs/customer-seat-hold-design.md) for the detailed transaction and schema.
 
 ## Technology
 
@@ -76,6 +90,11 @@ src/main/java/com/dmg/movieticketing/
 |  |- api/             Scheduling, discovery, and seat-availability contracts
 |  |- application/     Ownership, locking, pricing, snapshots, and queries
 |  `- domain/          Show, tier-price, and show-seat models
+|- hold/
+|  |- api/             Customer hold HTTP contracts
+|  |- application/     Atomic acquisition, expiry, and owner-scoped reads
+|  |- config/          Required hold-duration configuration
+|  `- domain/          Hold header, items, and repositories
 `- shared/api/         Common problem response handling
 
 src/main/resources/
@@ -109,9 +128,12 @@ export DB_URL=jdbc:postgresql://localhost:5432/movie_ticketing
 export DB_USERNAME=movie_ticketing
 export DB_PASSWORD=movie_ticketing
 export JWT_SECRET="$(openssl rand -base64 32)"
+export BOOKING_HOLD_DURATION=PT5M
 ```
 
 `JWT_SECRET` must be valid Base64 that decodes to at least 32 random bytes. It is required at startup and must not be committed.
+
+`BOOKING_HOLD_DURATION` is a required positive ISO-8601 duration. `PT5M` configures five-minute holds; choose the operational value appropriate for the environment.
 
 Default JWT settings are:
 
@@ -135,7 +157,7 @@ Flyway applies the database migration and Hibernate validates the resulting sche
 ./mvnw test
 ```
 
-Unit tests run without external services. Identity, theatre-management, and movie/show integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
+Unit tests run without external services. Identity, theatre-management, movie/show, and seat-hold integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
 
 Run the complete build lifecycle with:
 
@@ -347,6 +369,57 @@ The public `/shows` resource is backed by the `MovieShow` JPA entity and the `mo
 
 Important catalogue/show error codes include `MOVIE_NOT_FOUND`, `MOVIE_ALREADY_EXISTS`, `SHOW_NOT_FOUND`, `SHOW_TIME_CONFLICT`, `AUDITORIUM_HAS_NO_SEATS`, and `TIER_PRICE_MISMATCH`.
 
+## Customer seat hold API
+
+Both endpoints require `Authorization: Bearer <access-token>` for an account with role `CUSTOMER`. Theatre administrators cannot create or read customer holds.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/shows/{showId}/holds` | Atomically hold one or more seats for the configured duration. |
+| `GET` | `/api/v1/holds/{holdId}` | Read a hold owned by the authenticated customer. |
+
+Create a hold:
+
+```json
+{
+  "showSeatIds": [
+    "c4d7c07e-56eb-4abf-8aba-3b4a7b631375",
+    "d9c35647-f47f-43a5-8321-d4cc55459134"
+  ]
+}
+```
+
+Successful response — `201 Created`:
+
+```json
+{
+  "id": "973033f0-57bd-4ec3-bf42-d9a24bea39bb",
+  "showId": "6e6e5731-8c4b-4bcb-a0cf-f36a45233b6c",
+  "createdAt": "2026-09-25T12:00:00Z",
+  "expiresAt": "2026-09-25T12:05:00Z",
+  "status": "ACTIVE",
+  "seats": [
+    {
+      "showSeatId": "c4d7c07e-56eb-4abf-8aba-3b4a7b631375",
+      "rowLabel": "A",
+      "seatNumber": 1,
+      "seatLabel": "A1",
+      "tier": "REGULAR",
+      "price": {
+        "amount": 250.00,
+        "currency": "INR"
+      }
+    }
+  ]
+}
+```
+
+`status` is derived as `ACTIVE` while the current UTC instant is before `expiresAt`, otherwise `EXPIRED`. Expiry does not require a database update. The hold duration starts after all requested seat locks are acquired, so lock waiting does not consume the customer's hold window.
+
+The seat-ID list must be non-empty, contain no nulls, contain no duplicates, and refer entirely to the show in the URL. If any requested seat is unknown, belongs to another show, or has an active hold, the request returns `409 SEATS_UNAVAILABLE` and changes nothing. A show that has started returns `409 SHOW_ALREADY_STARTED`. Unknown or cross-customer hold reads return `404 HOLD_NOT_FOUND`.
+
+The first implementation intentionally has no hard seat-count cap, active-hold-per-customer limit, idempotency key, early-release endpoint, or custom database lock timeout. These policies can be added in a later design iteration.
+
 ## Confirmed identity decisions
 
 - Email is trimmed and lowercased for login and uniqueness. Provider-specific transformations are not applied.
@@ -363,7 +436,7 @@ Important catalogue/show error codes include `MOVIE_NOT_FOUND`, `MOVIE_ALREADY_E
 
 - Theatre, auditorium, and physical-seat updates, deactivation, and deletion.
 - Accessibility attributes and visual seat-map editing.
-- Time-bound seat holds and concurrency-safe booking.
+- Concurrency-safe booking and hold-to-booking conversion.
 - Dynamic show-pricing rules and discount codes.
 - Payments and booking confirmation.
 - Cancellation and configurable refunds.
@@ -380,4 +453,5 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 - [Identity and authentication design](Docs/designs/identity-authentication-design.md)
 - [Theatre administration design](Docs/designs/theatre-admin-management-design.md)
 - [Movie catalogue and show scheduling design](Docs/designs/movie-catalogue-and-show-scheduling-design.md)
+- [Customer seat hold design](Docs/designs/customer-seat-hold-design.md)
 - [Postman API collection](Docs/collection/movie-ticketing-platform.postman_collection.json)

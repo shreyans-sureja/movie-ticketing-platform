@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "84e91a08-64e2-4a75-bb55-6f163ce94c10",
     "name": "Movie Ticketing Platform API",
-    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity, Theatre Administration, and Movie Catalogue and Shows requests in order to populate JWT and resource ID variables. Empty folders under Future APIs are placeholders only.",
+    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity, Theatre Administration, Movie Catalogue and Shows, then Customer Seat Holds in order to populate JWT and resource ID variables. Empty folders under Future APIs are placeholders only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -86,6 +86,21 @@
     },
     {
       "key": "showDate",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "showSeatId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "secondShowSeatId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "holdId",
       "value": "",
       "type": "string"
     }
@@ -1041,6 +1056,22 @@
             },
             {
               "name": "List Show Seats",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Show seats returned', function () { pm.response.to.have.status(200); });",
+                      "if (pm.response.code === 200) {",
+                      "    const items = pm.response.json().items;",
+                      "    if (items.length > 0) pm.collectionVariables.set('showSeatId', items[0].showSeatId);",
+                      "    if (items.length > 1) pm.collectionVariables.set('secondShowSeatId', items[1].showSeatId);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
               "request": {
                 "method": "GET",
                 "header": [],
@@ -1066,12 +1097,97 @@
       ]
     },
     {
+      "name": "Customer Seat Holds",
+      "description": "Implemented CUSTOMER-only, all-or-nothing show-seat hold APIs. Run List Show Seats first to populate seat IDs.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerAccessToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Seat Hold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Seat hold created atomically', function () { pm.response.to.have.status(201); });",
+                  "if (pm.response.code === 201) { pm.collectionVariables.set('holdId', pm.response.json().id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showSeatIds\": [\n    \"{{showSeatId}}\",\n    \"{{secondShowSeatId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/shows/{{showId}}/holds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "shows",
+                "{{showId}}",
+                "holds"
+              ]
+            },
+            "description": "Creates one hold for the complete seat set. Any unavailable seat causes a 409 and no seat is held."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Owned Seat Hold",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/holds/{{holdId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "holds",
+                "{{holdId}}"
+              ]
+            },
+            "description": "Returns ACTIVE or EXPIRED for a hold owned by the authenticated customer."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Future APIs (Placeholders Only)",
       "description": "Organizational placeholders for approved project scope. Add requests only after each API contract is designed, approved, and implemented.",
       "item": [
         {
-          "name": "Seat Holds and Bookings",
-          "description": "Placeholder only; no API contract is defined.",
+          "name": "Bookings",
+          "description": "Placeholder only. Hold-to-booking conversion remains undesigned and unimplemented.",
           "item": []
         },
         {

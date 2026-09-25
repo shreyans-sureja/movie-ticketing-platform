@@ -8,7 +8,6 @@ import com.dmg.movieticketing.movie.domain.MovieRepository;
 import com.dmg.movieticketing.show.domain.MovieShow;
 import com.dmg.movieticketing.show.domain.MovieShowRepository;
 import com.dmg.movieticketing.show.domain.ShowSeat;
-import com.dmg.movieticketing.show.domain.ShowSeatAvailability;
 import com.dmg.movieticketing.show.domain.ShowSeatRepository;
 import com.dmg.movieticketing.show.domain.ShowTierPrice;
 import com.dmg.movieticketing.show.domain.ShowTierPriceRepository;
@@ -197,24 +196,25 @@ public class ShowService {
     @Transactional(readOnly = true)
     public ShowDetails getShow(UUID showId) {
         MovieShow show = findShow(showId);
+        Instant requestNow = clock.instant();
         return new ShowDetails(
                 show,
                 List.copyOf(showTierPriceRepository.findAllByShowIdOrderByTierAsc(showId)),
                 showSeatRepository.countByShowId(showId),
-                showSeatRepository.countByShowIdAndAvailabilityStatus(
-                        showId,
-                        ShowSeatAvailability.AVAILABLE
-                )
+                showSeatRepository.countEffectivelyAvailable(showId, requestNow)
         );
     }
 
     @Transactional(readOnly = true)
     public ShowSeatListing listShowSeats(UUID showId) {
         MovieShow show = findShow(showId);
+        Instant requestNow = clock.instant();
         return new ShowSeatListing(
                 showId,
                 show.getCurrency(),
-                List.copyOf(showSeatRepository.findAllByShowIdOrderByRowLabelAscSeatNumberAscIdAsc(showId))
+                showSeatRepository.findAllWithCurrentHoldExpiry(showId).stream()
+                        .map(data -> new ShowSeatView(data.seat(), data.effectiveAvailabilityAt(requestNow)))
+                        .toList()
         );
     }
 

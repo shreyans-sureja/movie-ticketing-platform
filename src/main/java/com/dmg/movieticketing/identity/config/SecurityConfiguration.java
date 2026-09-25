@@ -43,6 +43,10 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/admins/signup",
                                 "/api/v1/auth/signin"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/shows/*/holds")
+                        .hasRole("CUSTOMER")
+                        .requestMatchers("/api/v1/holds/**")
+                        .hasRole("CUSTOMER")
                         .requestMatchers(
                                 HttpMethod.GET,
                                 "/api/v1/cities",

@@ -25,3 +25,5 @@ app:
       access-token-ttl: PT15M
       clock-skew: PT30S
 
+booking:
+  hold-duration: ${BOOKING_HOLD_DURATION}

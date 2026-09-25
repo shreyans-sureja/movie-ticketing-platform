@@ -1,5 +1,8 @@
 package com.dmg.movieticketing.shared.api;
 
+import com.dmg.movieticketing.hold.application.HoldNotFoundException;
+import com.dmg.movieticketing.hold.application.SeatsUnavailableException;
+import com.dmg.movieticketing.hold.application.ShowAlreadyStartedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -72,5 +75,27 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().violations()).containsExactly(
                 new FieldViolation("date", "DATE_TYPE", "Request parameter has an invalid value.")
         );
+    }
+
+    @Test
+    void holdErrorsUseStandardProblemCodes() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/v1/shows/00000000-0000-0000-0000-000000000001/holds"
+        );
+
+        var unavailable = handler.handleSeatsUnavailable(new SeatsUnavailableException(), request);
+        var started = handler.handleShowAlreadyStarted(new ShowAlreadyStartedException(), request);
+        var missing = handler.handleHoldNotFound(new HoldNotFoundException(), request);
+
+        assertThat(unavailable.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(unavailable.getBody()).isNotNull();
+        assertThat(unavailable.getBody().code()).isEqualTo("SEATS_UNAVAILABLE");
+        assertThat(started.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(started.getBody()).isNotNull();
+        assertThat(started.getBody().code()).isEqualTo("SHOW_ALREADY_STARTED");
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(missing.getBody()).isNotNull();
+        assertThat(missing.getBody().code()).isEqualTo("HOLD_NOT_FOUND");
     }
 }

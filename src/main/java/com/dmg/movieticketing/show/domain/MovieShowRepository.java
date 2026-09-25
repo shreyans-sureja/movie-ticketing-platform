@@ -39,6 +39,10 @@ public interface MovieShowRepository extends JpaRepository<MovieShow, UUID> {
                 MAX(showSeat.price),
                 SUM(CASE
                     WHEN showSeat.availabilityStatus = com.dmg.movieticketing.show.domain.ShowSeatAvailability.AVAILABLE
+                      OR (
+                          showSeat.availabilityStatus = com.dmg.movieticketing.show.domain.ShowSeatAvailability.HELD
+                          AND currentHold.expiresAt <= :requestNow
+                      )
                     THEN 1 ELSE 0
                 END)
             )
@@ -47,6 +51,7 @@ public interface MovieShowRepository extends JpaRepository<MovieShow, UUID> {
             JOIN movieShow.auditorium auditorium
             JOIN auditorium.theatre theatre
             JOIN ShowSeat showSeat ON showSeat.show = movieShow
+            LEFT JOIN SeatHold currentHold ON currentHold.id = showSeat.currentHoldId
             WHERE theatre.city.id = :cityId
               AND movieShow.movie.id = :movieId
               AND movieShow.startsAt >= :dayStart
