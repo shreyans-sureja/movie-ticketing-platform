@@ -1,0 +1,177 @@
+package com.dmg.movieticketing.booking.application;
+
+import com.dmg.movieticketing.booking.domain.Booking;
+import com.dmg.movieticketing.booking.domain.BookingItem;
+import com.dmg.movieticketing.booking.domain.BookingItemRepository;
+import com.dmg.movieticketing.booking.domain.BookingRepository;
+import com.dmg.movieticketing.hold.domain.SeatHold;
+import com.dmg.movieticketing.hold.domain.SeatHoldRepository;
+import com.dmg.movieticketing.show.domain.MovieShow;
+import com.dmg.movieticketing.show.domain.ShowSeat;
+import com.dmg.movieticketing.show.domain.ShowSeatAvailability;
+import com.dmg.movieticketing.show.domain.ShowSeatRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class BookingServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-09-25T10:00:00Z");
+    private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+
+    @Mock
+    private SeatHoldRepository seatHoldRepository;
+    @Mock
+    private ShowSeatRepository showSeatRepository;
+    @Mock
+    private BookingRepository bookingRepository;
+    @Mock
+    private BookingItemRepository bookingItemRepository;
+
+    private BookingService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new BookingService(
+                seatHoldRepository,
+                showSeatRepository,
+                bookingRepository,
+                bookingItemRepository,
+                CLOCK
+        );
+    }
+
+    @Test
+    void createsBookingFlushesItemsThenUpdatesEverySeat() {
+        UUID customerId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        UUID showId = UUID.randomUUID();
+        SeatHold hold = org.mockito.Mockito.mock(SeatHold.class);
+        MovieShow show = org.mockito.Mockito.mock(MovieShow.class);
+        ShowSeat firstSeat = ownedSeat(show, holdId, "250.00");
+        ShowSeat secondSeat = ownedSeat(show, holdId, "400.00");
+
+        when(hold.getId()).thenReturn(holdId);
+        when(hold.getExpiresAt()).thenReturn(NOW.plusSeconds(60));
+        when(hold.getShow()).thenReturn(show);
+        when(show.getId()).thenReturn(showId);
+        when(show.getStartsAt()).thenReturn(NOW.plusSeconds(3600));
+        when(show.getCurrency()).thenReturn("INR");
+        when(seatHoldRepository.findOwnedForUpdate(holdId, customerId)).thenReturn(Optional.of(hold));
+        when(bookingRepository.findBySourceHoldId(holdId)).thenReturn(Optional.empty());
+        when(showSeatRepository.findAllForBookingUpdate(holdId)).thenReturn(List.of(firstSeat, secondSeat));
+
+        BookingConfirmationResult result = service.confirm(customerId, holdId);
+
+        assertThat(result.created()).isTrue();
+        assertThat(result.details().booking().getTotalAmount()).isEqualByComparingTo("650.00");
+        assertThat(result.details().items()).hasSize(2);
+        InOrder writes = inOrder(bookingRepository, bookingItemRepository, showSeatRepository);
+        writes.verify(bookingRepository).save(any(Booking.class));
+        writes.verify(bookingItemRepository).saveAllAndFlush(anyList());
+        writes.verify(showSeatRepository).saveAllAndFlush(List.of(firstSeat, secondSeat));
+        verify(firstSeat).confirmBooking(result.details().booking().getId());
+        verify(secondSeat).confirmBooking(result.details().booking().getId());
+    }
+
+    @Test
+    void duplicateConfirmationReturnsExistingBookingBeforeExpiryCheckOrSeatLock() {
+        UUID customerId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        SeatHold hold = org.mockito.Mockito.mock(SeatHold.class);
+        Booking booking = org.mockito.Mockito.mock(Booking.class);
+
+        when(booking.getId()).thenReturn(UUID.randomUUID());
+        when(seatHoldRepository.findOwnedForUpdate(holdId, customerId)).thenReturn(Optional.of(hold));
+        when(bookingRepository.findBySourceHoldId(holdId)).thenReturn(Optional.of(booking));
+        when(bookingItemRepository.findAllForBooking(booking.getId())).thenReturn(List.of());
+
+        BookingConfirmationResult result = service.confirm(customerId, holdId);
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.details().booking()).isSameAs(booking);
+        verifyNoInteractions(showSeatRepository);
+        verify(bookingRepository, never()).save(any());
+    }
+
+    @Test
+    void expirationAtExactBoundaryRejectsBeforeWrites() {
+        UUID customerId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        SeatHold hold = org.mockito.Mockito.mock(SeatHold.class);
+
+        when(hold.getExpiresAt()).thenReturn(NOW);
+        when(seatHoldRepository.findOwnedForUpdate(holdId, customerId)).thenReturn(Optional.of(hold));
+        when(bookingRepository.findBySourceHoldId(holdId)).thenReturn(Optional.empty());
+        when(showSeatRepository.findAllForBookingUpdate(holdId)).thenReturn(List.of(
+                org.mockito.Mockito.mock(ShowSeat.class)
+        ));
+
+        assertThatThrownBy(() -> service.confirm(customerId, holdId))
+                .isInstanceOf(HoldExpiredException.class);
+
+        verify(bookingRepository, never()).save(any());
+        verifyNoInteractions(bookingItemRepository);
+    }
+
+    @Test
+    void mismatchedSeatOwnershipRejectsCompleteConfirmation() {
+        UUID customerId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        SeatHold hold = org.mockito.Mockito.mock(SeatHold.class);
+        MovieShow show = org.mockito.Mockito.mock(MovieShow.class);
+        ShowSeat seat = org.mockito.Mockito.mock(ShowSeat.class);
+
+        when(hold.getId()).thenReturn(holdId);
+        when(hold.getExpiresAt()).thenReturn(NOW.plusSeconds(60));
+        when(hold.getShow()).thenReturn(show);
+        when(show.getStartsAt()).thenReturn(NOW.plusSeconds(3600));
+        when(show.getId()).thenReturn(UUID.randomUUID());
+        when(seat.getShow()).thenReturn(show);
+        when(seat.getAvailabilityStatus()).thenReturn(ShowSeatAvailability.HELD);
+        when(seat.getCurrentHoldId()).thenReturn(UUID.randomUUID());
+        when(seatHoldRepository.findOwnedForUpdate(holdId, customerId)).thenReturn(Optional.of(hold));
+        when(bookingRepository.findBySourceHoldId(holdId)).thenReturn(Optional.empty());
+        when(showSeatRepository.findAllForBookingUpdate(holdId)).thenReturn(List.of(seat));
+
+        assertThatThrownBy(() -> service.confirm(customerId, holdId))
+                .isInstanceOf(HoldNoLongerOwnsSeatsException.class);
+
+        verify(bookingRepository, never()).save(any());
+        verifyNoInteractions(bookingItemRepository);
+    }
+
+    private ShowSeat ownedSeat(MovieShow show, UUID holdId, String price) {
+        ShowSeat seat = org.mockito.Mockito.mock(ShowSeat.class);
+        when(seat.getId()).thenReturn(UUID.randomUUID());
+        when(seat.getRowLabel()).thenReturn("A");
+        when(seat.getShow()).thenReturn(show);
+        when(seat.getAvailabilityStatus()).thenReturn(ShowSeatAvailability.HELD);
+        when(seat.getCurrentHoldId()).thenReturn(holdId);
+        when(seat.getCurrency()).thenReturn("INR");
+        when(seat.getPrice()).thenReturn(new BigDecimal(price));
+        return seat;
+    }
+}

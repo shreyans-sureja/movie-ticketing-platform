@@ -35,6 +35,7 @@ public class SeatHoldService {
     private final SeatHoldItemRepository seatHoldItemRepository;
     private final HoldProperties holdProperties;
     private final Clock clock;
+    private final HoldConversionLookup holdConversionLookup;
 
     public SeatHoldService(
             MovieShowRepository movieShowRepository,
@@ -42,7 +43,8 @@ public class SeatHoldService {
             SeatHoldRepository seatHoldRepository,
             SeatHoldItemRepository seatHoldItemRepository,
             HoldProperties holdProperties,
-            Clock clock
+            Clock clock,
+            HoldConversionLookup holdConversionLookup
     ) {
         this.movieShowRepository = movieShowRepository;
         this.showSeatRepository = showSeatRepository;
@@ -50,6 +52,7 @@ public class SeatHoldService {
         this.seatHoldItemRepository = seatHoldItemRepository;
         this.holdProperties = holdProperties;
         this.clock = clock;
+        this.holdConversionLookup = holdConversionLookup;
     }
 
     @Transactional
@@ -100,7 +103,12 @@ public class SeatHoldService {
         List<ShowSeat> seats = seatHoldItemRepository.findAllForHold(holdId).stream()
                 .map(SeatHoldItem::getShowSeat)
                 .toList();
-        HoldStatus status = hold.isActiveAt(clock.instant()) ? HoldStatus.ACTIVE : HoldStatus.EXPIRED;
+        HoldStatus status;
+        if (holdConversionLookup.isConverted(holdId)) {
+            status = HoldStatus.CONVERTED;
+        } else {
+            status = hold.isActiveAt(clock.instant()) ? HoldStatus.ACTIVE : HoldStatus.EXPIRED;
+        }
         return new HoldDetails(hold, status, List.copyOf(seats));
     }
 

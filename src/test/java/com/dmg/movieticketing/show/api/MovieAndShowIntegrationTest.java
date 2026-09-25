@@ -1,5 +1,7 @@
 package com.dmg.movieticketing.show.api;
 
+import com.dmg.movieticketing.booking.domain.BookingItemRepository;
+import com.dmg.movieticketing.booking.domain.BookingRepository;
 import com.dmg.movieticketing.identity.api.SignInRequest;
 import com.dmg.movieticketing.identity.api.SignupRequest;
 import com.dmg.movieticketing.identity.domain.UserAccountRepository;
@@ -76,6 +78,12 @@ class MovieAndShowIntegrationTest {
     private ShowSeatRepository showSeatRepository;
 
     @Autowired
+    private BookingItemRepository bookingItemRepository;
+
+    @Autowired
+    private BookingRepository bookingRepository;
+
+    @Autowired
     private SeatHoldItemRepository seatHoldItemRepository;
 
     @Autowired
@@ -107,6 +115,15 @@ class MovieAndShowIntegrationTest {
 
     @BeforeEach
     void clearOperationalData() {
+        jdbcTemplate.update("""
+                UPDATE show_seat
+                SET availability_status = 'AVAILABLE',
+                    current_hold_id = NULL,
+                    current_booking_id = NULL
+                WHERE current_booking_id IS NOT NULL
+                """);
+        bookingItemRepository.deleteAllInBatch();
+        bookingRepository.deleteAllInBatch();
         seatHoldItemRepository.deleteAllInBatch();
         showSeatRepository.deleteAllInBatch();
         seatHoldRepository.deleteAllInBatch();
@@ -164,6 +181,7 @@ class MovieAndShowIntegrationTest {
         String theatreId = createTheatre(adminToken, "Central Cinema");
         String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
         createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
         createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
 
         Instant startsAt = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
@@ -459,6 +477,158 @@ class MovieAndShowIntegrationTest {
         assertThat(heldSeats).isEqualTo(2);
     }
 
+    @Test
+    void customerConfirmsOwnedHoldReadsBookingAndSeesOnlyOwnedHistory() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "booking-admin@example.com",
+                "administrator-password"
+        );
+        String customerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "booking-customer@example.com",
+                "customer-password"
+        );
+        String otherCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "booking-other@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Booking Film", 120, "en");
+        String theatreId = createTheatre(adminToken, "Booking Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        Instant startsAt = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+        String showId = createShow(adminToken, theatreId, auditoriumId, movieId, startsAt);
+        List<String> seatIds = showSeatIds(showId);
+        String holdId = createHold(customerToken, showId, seatIds.subList(0, 2));
+
+        mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(otherCustomerToken)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isForbidden());
+
+        String bookingBody = mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.holdId").value(holdId))
+                .andExpect(jsonPath("$.showId").value(showId))
+                .andExpect(jsonPath("$.totalPrice.amount").value(500.00))
+                .andExpect(jsonPath("$.totalPrice.currency").value("INR"))
+                .andExpect(jsonPath("$.seats.length()").value(2))
+                .andExpect(jsonPath("$.seats[0].seatLabel").value("A1"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String bookingId = objectMapper.readTree(bookingBody).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(bookingId));
+
+        mockMvc.perform(get("/api/v1/bookings/{bookingId}", bookingId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.seats.length()").value(2));
+
+        mockMvc.perform(get("/api/v1/bookings/{bookingId}", bookingId)
+                        .header("Authorization", bearer(otherCustomerToken)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
+
+        mockMvc.perform(get("/api/v1/bookings")
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(bookingId))
+                .andExpect(jsonPath("$.items[0].seatCount").value(2))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        mockMvc.perform(get("/api/v1/bookings")
+                        .header("Authorization", bearer(otherCustomerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        mockMvc.perform(get("/api/v1/holds/{holdId}", holdId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONVERTED"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].availability").value("BOOKED"))
+                .andExpect(jsonPath("$.items[1].availability").value("BOOKED"))
+                .andExpect(jsonPath("$.items[2].availability").value("AVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableSeatCount").value(1));
+
+        mockMvc.perform(get("/api/v1/bookings")
+                        .header("Authorization", bearer(customerToken))
+                        .param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(bookingRepository.count()).isEqualTo(1);
+        assertThat(bookingItemRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentDuplicateConfirmationsCreateOneBookingAndReturnSameResource() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "booking-race-admin@example.com",
+                "administrator-password"
+        );
+        String customerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "booking-race-customer@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Booking Race Film", 120, "en");
+        String theatreId = createTheatre(adminToken, "Booking Race Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        String showId = createShow(
+                adminToken,
+                theatreId,
+                auditoriumId,
+                movieId,
+                Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)
+        );
+        String holdId = createHold(customerToken, showId, showSeatIds(showId).subList(0, 2));
+
+        CountDownLatch start = new CountDownLatch(1);
+        List<ConfirmationHttpResult> results;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<ConfirmationHttpResult> first = executor.submit(
+                    () -> confirmBookingAfter(start, customerToken, holdId)
+            );
+            Future<ConfirmationHttpResult> second = executor.submit(
+                    () -> confirmBookingAfter(start, customerToken, holdId)
+            );
+            start.countDown();
+            results = List.of(first.get(), second.get());
+        }
+
+        assertThat(results).extracting(ConfirmationHttpResult::status)
+                .containsExactlyInAnyOrder(201, 200);
+        assertThat(results).extracting(ConfirmationHttpResult::bookingId).doesNotContainNull();
+        assertThat(results.get(0).bookingId()).isEqualTo(results.get(1).bookingId());
+        assertThat(bookingRepository.count()).isEqualTo(1);
+        assertThat(bookingItemRepository.count()).isEqualTo(2);
+    }
+
     private List<Integer> createShowsConcurrently(
             String token,
             String theatreId,
@@ -527,6 +697,20 @@ class MovieAndShowIntegrationTest {
                 .getStatus();
     }
 
+    private ConfirmationHttpResult confirmBookingAfter(
+            CountDownLatch start,
+            String token,
+            String holdId
+    ) throws Exception {
+        start.await();
+        var response = mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(token)))
+                .andReturn()
+                .getResponse();
+        String bookingId = objectMapper.readTree(response.getContentAsString()).path("id").asText(null);
+        return new ConfirmationHttpResult(response.getStatus(), bookingId);
+    }
+
     private List<String> showSeatIds(String showId) throws Exception {
         String response = mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
                 .andExpect(status().isOk())
@@ -540,6 +724,18 @@ class MovieAndShowIntegrationTest {
 
     private String holdBody(List<String> showSeatIds) throws Exception {
         return objectMapper.writeValueAsString(Map.of("showSeatIds", showSeatIds));
+    }
+
+    private String createHold(String token, String showId, List<String> showSeatIds) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(showSeatIds)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response).get("id").asText();
     }
 
     private String signupAndSignIn(String signupPath, String email, String password) throws Exception {
@@ -670,5 +866,8 @@ class MovieAndShowIntegrationTest {
 
     private String bearer(String token) {
         return "Bearer " + token;
+    }
+
+    private record ConfirmationHttpResult(int status, String bookingId) {
     }
 }

@@ -130,3 +130,35 @@
 ## Prompt 16
 
 > please continue
+
+## Prompt 17
+
+> Let's design the booking confirmation flow. Do not implement
+>
+> Customer should be able to convert their own active seat holding into a confirmed booking. Do not include real payment, successful confirmation can directly create the booking.
+>
+> Review the existing hold and show seat design, propose concurrency safe design. include db , state changes, contracts, transcation flow, etc.
+>
+> cancellation, payment, refunc, notification, etc out of the scope for this.
+
+## Prompt 18
+
+> it is good but please update with below things.
+>
+> Add a customer booking history api, return only the authenticated customer's booking.
+>
+> keep show_seat.current_booking_id and the composite foreign key to booking_item. I want you to do this order -> create the booking, create and flush booking items, and then update the show seats.
+>
+> remove unnecesary indecies like show-level which are not in use by apis.
+
+## Prompt 19
+
+> implement it
+
+## Prompt 20
+
+> remove cyclic package dependency in hold and bokking modules.
+>
+> create a interface in hold for checking whether a hold has been converted or now.  Make seatholdService depend on that interface instead of repository import.
+>
+> keep the lookup sync and backed by same postgres db. Do not add separate transaction, etc. Only do internal dependency cleanup. Do not change API, schema etc.

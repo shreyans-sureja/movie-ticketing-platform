@@ -29,7 +29,7 @@ This document describes the implemented customer seat-hold phase that follows sh
 
 ### 2.2 Out of scope
 
-- Booking confirmation or conversion of a hold into a booking.
+- Booking confirmation behavior, which is implemented as the separate [booking confirmation flow](booking-confirmation-design.md).
 - Payment initiation, payment callbacks, or payment timeout behavior.
 - Hold extension or refresh.
 - Explicit hold release/cancellation.
@@ -421,4 +421,4 @@ The first implementation makes the following explicit choices:
 7. `SEATS_UNAVAILABLE` is deliberately generic and does not identify individual losing seats.
 8. PostgreSQL's configured lock-wait behavior is used; the application does not define a custom lock timeout or timeout-specific API error.
 
-Booking conversion, including how it locks an active hold and prevents expiry races during payment, requires a separate design before implementation.
+Direct booking conversion is covered by the implemented [booking confirmation design](booking-confirmation-design.md). Payment remains a separate future design.

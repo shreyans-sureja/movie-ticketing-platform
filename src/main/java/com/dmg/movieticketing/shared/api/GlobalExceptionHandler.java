@@ -1,5 +1,8 @@
 package com.dmg.movieticketing.shared.api;
 
+import com.dmg.movieticketing.booking.application.BookingNotFoundException;
+import com.dmg.movieticketing.booking.application.HoldExpiredException;
+import com.dmg.movieticketing.booking.application.HoldNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.city.application.CityNotFoundException;
 import com.dmg.movieticketing.hold.application.HoldNotFoundException;
 import com.dmg.movieticketing.hold.application.SeatsUnavailableException;
@@ -410,6 +413,48 @@ public class GlobalExceptionHandler {
                 exception.getMessage(),
                 request,
                 "SHOW_ALREADY_STARTED"
+        );
+    }
+
+    @ExceptionHandler(BookingNotFoundException.class)
+    ResponseEntity<ApiProblem> handleBookingNotFound(
+            BookingNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return notFound(
+                "booking-not-found",
+                "Booking not found",
+                exception.getMessage(),
+                request,
+                "BOOKING_NOT_FOUND"
+        );
+    }
+
+    @ExceptionHandler(HoldExpiredException.class)
+    ResponseEntity<ApiProblem> handleHoldExpired(
+            HoldExpiredException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "hold-expired",
+                "Hold expired",
+                exception.getMessage(),
+                request,
+                "HOLD_EXPIRED"
+        );
+    }
+
+    @ExceptionHandler(HoldNoLongerOwnsSeatsException.class)
+    ResponseEntity<ApiProblem> handleHoldNoLongerOwnsSeats(
+            HoldNoLongerOwnsSeatsException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "hold-no-longer-owns-seats",
+                "Hold no longer owns seats",
+                exception.getMessage(),
+                request,
+                "HOLD_NO_LONGER_OWNS_SEATS"
         );
     }
 
