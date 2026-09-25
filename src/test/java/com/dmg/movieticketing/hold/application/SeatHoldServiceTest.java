@@ -46,6 +46,8 @@ class SeatHoldServiceTest {
     private SeatHoldRepository seatHoldRepository;
     @Mock
     private SeatHoldItemRepository seatHoldItemRepository;
+    @Mock
+    private HoldConversionLookup holdConversionLookup;
 
     private SeatHoldService service;
 
@@ -57,7 +59,8 @@ class SeatHoldServiceTest {
                 seatHoldRepository,
                 seatHoldItemRepository,
                 new HoldProperties(Duration.ofMinutes(5)),
-                CLOCK
+                CLOCK,
+                holdConversionLookup
         );
     }
 
@@ -163,6 +166,23 @@ class SeatHoldServiceTest {
     }
 
     @Test
+    void convertedStatusUsesHoldOwnedLookupBoundary() {
+        UUID customerId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        SeatHold hold = org.mockito.Mockito.mock(SeatHold.class);
+
+        when(seatHoldRepository.findByIdAndCustomerAccountId(holdId, customerId))
+                .thenReturn(Optional.of(hold));
+        when(seatHoldItemRepository.findAllForHold(holdId)).thenReturn(List.of());
+        when(holdConversionLookup.isConverted(holdId)).thenReturn(true);
+
+        HoldDetails result = service.getHold(customerId, holdId);
+
+        assertThat(result.status()).isEqualTo(HoldStatus.CONVERTED);
+        verify(holdConversionLookup).isConverted(holdId);
+    }
+
+    @Test
     void duplicateSeatIdsAreRejectedBeforeDatabaseAccess() {
         UUID seatId = UUID.randomUUID();
 
@@ -173,6 +193,12 @@ class SeatHoldServiceTest {
         )).isInstanceOf(DomainValidationException.class)
                 .hasMessage("Show seat IDs must not contain duplicates.");
 
-        verifyNoInteractions(movieShowRepository, showSeatRepository, seatHoldRepository, seatHoldItemRepository);
+        verifyNoInteractions(
+                movieShowRepository,
+                showSeatRepository,
+                seatHoldRepository,
+                seatHoldItemRepository,
+                holdConversionLookup
+        );
     }
 }

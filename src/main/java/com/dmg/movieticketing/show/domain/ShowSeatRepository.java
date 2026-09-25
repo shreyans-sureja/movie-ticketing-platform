@@ -36,6 +36,16 @@ public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
             @Param("showSeatIds") List<UUID> showSeatIds
     );
 
+    @Query(value = """
+            SELECT show_seat.*
+            FROM show_seat
+            JOIN seat_hold_item ON seat_hold_item.show_seat_id = show_seat.id
+            WHERE seat_hold_item.hold_id = :holdId
+            ORDER BY show_seat.id
+            FOR UPDATE OF show_seat
+            """, nativeQuery = true)
+    List<ShowSeat> findAllForBookingUpdate(@Param("holdId") UUID holdId);
+
     long countByShowId(UUID showId);
 
     @Query("""

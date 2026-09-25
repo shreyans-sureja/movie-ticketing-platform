@@ -1,5 +1,8 @@
 package com.dmg.movieticketing.shared.api;
 
+import com.dmg.movieticketing.booking.application.BookingNotFoundException;
+import com.dmg.movieticketing.booking.application.HoldExpiredException;
+import com.dmg.movieticketing.booking.application.HoldNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.hold.application.HoldNotFoundException;
 import com.dmg.movieticketing.hold.application.SeatsUnavailableException;
 import com.dmg.movieticketing.hold.application.ShowAlreadyStartedException;
@@ -97,5 +100,30 @@ class GlobalExceptionHandlerTest {
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(missing.getBody()).isNotNull();
         assertThat(missing.getBody().code()).isEqualTo("HOLD_NOT_FOUND");
+    }
+
+    @Test
+    void bookingErrorsUseStandardProblemCodes() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/v1/holds/00000000-0000-0000-0000-000000000001/booking"
+        );
+
+        var expired = handler.handleHoldExpired(new HoldExpiredException(), request);
+        var ownership = handler.handleHoldNoLongerOwnsSeats(
+                new HoldNoLongerOwnsSeatsException(),
+                request
+        );
+        var missing = handler.handleBookingNotFound(new BookingNotFoundException(), request);
+
+        assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(expired.getBody()).isNotNull();
+        assertThat(expired.getBody().code()).isEqualTo("HOLD_EXPIRED");
+        assertThat(ownership.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ownership.getBody()).isNotNull();
+        assertThat(ownership.getBody().code()).isEqualTo("HOLD_NO_LONGER_OWNS_SEATS");
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(missing.getBody()).isNotNull();
+        assertThat(missing.getBody().code()).isEqualTo("BOOKING_NOT_FOUND");
     }
 }

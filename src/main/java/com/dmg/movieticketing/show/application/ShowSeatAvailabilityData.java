@@ -14,6 +14,9 @@ public record ShowSeatAvailabilityData(
         if (seat.getAvailabilityStatus() == ShowSeatAvailability.AVAILABLE) {
             return ShowSeatAvailability.AVAILABLE;
         }
+        if (seat.getAvailabilityStatus() == ShowSeatAvailability.BOOKED) {
+            return ShowSeatAvailability.BOOKED;
+        }
         if (currentHoldExpiresAt != null && !currentHoldExpiresAt.isAfter(requestNow)) {
             return ShowSeatAvailability.AVAILABLE;
         }

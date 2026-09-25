@@ -54,6 +54,9 @@ public class ShowSeat {
     @Column(name = "current_hold_id")
     private UUID currentHoldId;
 
+    @Column(name = "current_booking_id")
+    private UUID currentBookingId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -140,9 +143,20 @@ public class ShowSeat {
         return currentHoldId;
     }
 
+    public UUID getCurrentBookingId() {
+        return currentBookingId;
+    }
+
     public void assignHold(UUID holdId) {
         this.availabilityStatus = ShowSeatAvailability.HELD;
         this.currentHoldId = holdId;
+        this.currentBookingId = null;
+    }
+
+    public void confirmBooking(UUID bookingId) {
+        this.availabilityStatus = ShowSeatAvailability.BOOKED;
+        this.currentHoldId = null;
+        this.currentBookingId = bookingId;
     }
 
     public Instant getCreatedAt() {

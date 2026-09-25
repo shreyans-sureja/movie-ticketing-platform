@@ -2,7 +2,7 @@
 
 A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
 
-The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, and temporary customer seat holds are implemented. Bookings, payments, refunds, and notifications remain future work.
+The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, and customer booking history are implemented. Payments, refunds, and notifications remain future work.
 
 ## Implemented scope
 
@@ -38,9 +38,13 @@ The current implementation provides:
 - PostgreSQL row locking that permits only one winner for overlapping concurrent hold requests.
 - Configurable hold duration and query-driven lazy expiry without a cron job.
 - Customer-owned hold detail and expiry-aware show-seat/show-search availability.
+- Atomic conversion of an owned active hold into one confirmed booking.
+- Retry-safe booking confirmation with one booking per hold.
+- `BOOKED` show-seat state with database-enforced booking-item ownership.
+- Customer-owned booking detail and paginated booking history.
 - UTC timestamp storage and an injected UTC `Clock` for application time.
 
-Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Holds operate on show-specific seat inventory, and future bookings will do the same rather than using the physical-seat layout.
+Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Holds and bookings operate on show-specific seat inventory rather than the physical-seat layout.
 
 ## Customer seat holds
 
@@ -51,6 +55,14 @@ The concurrency boundary is the requested set of PostgreSQL `show_seat` rows. A 
 Hold duration is external configuration and all expiry calculations use the injected UTC `Clock`. Expiry is lazy and query-driven: a seat is effectively available when it is stored as `AVAILABLE`, or when it is stored as `HELD` and its current hold has expired. Public seat reads and aggregate show-search availability counts use this combined condition. A cron job or scheduled expiry worker is not required for correctness.
 
 Expired holds remain readable as `EXPIRED`, while their seats can be acquired by a new hold. Historical hold items are retained and the current hold pointer on each show seat is replaced transactionally. See the [customer seat hold design](Docs/designs/customer-seat-hold-design.md) for the detailed transaction and schema.
+
+## Booking confirmation
+
+An authenticated customer can convert their own active hold into one `CONFIRMED` booking. Confirmation locks the owned hold and then its complete show-seat set. It creates the booking, creates and flushes every booking item, and only then changes the seats to `BOOKED`. The transaction clears each seat's hold pointer and assigns `current_booking_id`; a composite foreign key ensures that pointer identifies a booking item for the exact seat.
+
+Confirmation is naturally retry-safe. `booking.source_hold_id` is unique, so the first request creates the booking with `201 Created` and a later retry returns the same booking with `200 OK`. A lost HTTP response therefore cannot create a duplicate booking. Booked seats are excluded from public availability and available-seat counts.
+
+Booking detail and history are owner-scoped using the account ID from the verified JWT. History uses deterministic newest-first pagination and calculates seat counts in the page query rather than querying once per booking. Payment, cancellation, refund, and notification behavior remain out of scope. See the [booking confirmation design](Docs/designs/booking-confirmation-design.md) for the transaction and schema invariants.
 
 ## Technology
 
@@ -95,6 +107,10 @@ src/main/java/com/dmg/movieticketing/
 |  |- application/     Atomic acquisition, expiry, and owner-scoped reads
 |  |- config/          Required hold-duration configuration
 |  `- domain/          Hold header, items, and repositories
+|- booking/
+|  |- api/             Confirmation, owned detail, and history contracts
+|  |- application/     Locking, confirmation, retry, and query use cases
+|  `- domain/          Booking header, items, state, and repositories
 `- shared/api/         Common problem response handling
 
 src/main/resources/
@@ -157,7 +173,7 @@ Flyway applies the database migration and Hibernate validates the resulting sche
 ./mvnw test
 ```
 
-Unit tests run without external services. Identity, theatre-management, movie/show, and seat-hold integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
+Unit tests run without external services. Identity, theatre-management, movie/show, seat-hold, and booking integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
 
 Run the complete build lifecycle with:
 
@@ -414,11 +430,27 @@ Successful response — `201 Created`:
 }
 ```
 
-`status` is derived as `ACTIVE` while the current UTC instant is before `expiresAt`, otherwise `EXPIRED`. Expiry does not require a database update. The hold duration starts after all requested seat locks are acquired, so lock waiting does not consume the customer's hold window.
+`status` is derived as `ACTIVE` while the current UTC instant is before `expiresAt`, `EXPIRED` after that boundary, or `CONVERTED` once the hold has produced a booking. Expiry does not require a database update. The hold duration starts after all requested seat locks are acquired, so lock waiting does not consume the customer's hold window.
 
 The seat-ID list must be non-empty, contain no nulls, contain no duplicates, and refer entirely to the show in the URL. If any requested seat is unknown, belongs to another show, or has an active hold, the request returns `409 SEATS_UNAVAILABLE` and changes nothing. A show that has started returns `409 SHOW_ALREADY_STARTED`. Unknown or cross-customer hold reads return `404 HOLD_NOT_FOUND`.
 
 The first implementation intentionally has no hard seat-count cap, active-hold-per-customer limit, idempotency key, early-release endpoint, or custom database lock timeout. These policies can be added in a later design iteration.
+
+## Customer booking API
+
+All booking endpoints require `Authorization: Bearer <access-token>` for an account with role `CUSTOMER`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/holds/{holdId}/booking` | Atomically confirm the authenticated customer's active hold. |
+| `GET` | `/api/v1/bookings/{bookingId}` | Read a confirmed booking owned by the authenticated customer. |
+| `GET` | `/api/v1/bookings?page=0&size=20` | List only the authenticated customer's bookings, newest first. |
+
+Confirmation takes no request body. A successful response contains the booking ID, source hold, show, confirmation time, total price, and complete seat set. The first confirmation returns `201`; an exact retry returns the same representation with `200`.
+
+History defaults to page `0` and size `20`, with a maximum size of `100`. Its compact entries contain the booking ID, show ID, status, confirmation time, total price, and seat count. Use the detail endpoint for individual seat information.
+
+Important booking error codes are `BOOKING_NOT_FOUND`, `HOLD_EXPIRED`, `HOLD_NO_LONGER_OWNS_SEATS`, and `SHOW_ALREADY_STARTED`. Missing and cross-customer resources use the same not-found response.
 
 ## Confirmed identity decisions
 
@@ -436,11 +468,9 @@ The first implementation intentionally has no hard seat-count cap, active-hold-p
 
 - Theatre, auditorium, and physical-seat updates, deactivation, and deletion.
 - Accessibility attributes and visual seat-map editing.
-- Concurrency-safe booking and hold-to-booking conversion.
 - Dynamic show-pricing rules and discount codes.
-- Payments and booking confirmation.
+- Payments.
 - Cancellation and configurable refunds.
-- Booking history.
 - Non-blocking confirmation and reminder notifications.
 
 The assignment continues to exclude a frontend, deployment/containerization, CI/CD, microservices, advanced authentication, and production-grade monitoring.
@@ -454,4 +484,5 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 - [Theatre administration design](Docs/designs/theatre-admin-management-design.md)
 - [Movie catalogue and show scheduling design](Docs/designs/movie-catalogue-and-show-scheduling-design.md)
 - [Customer seat hold design](Docs/designs/customer-seat-hold-design.md)
+- [Booking confirmation design](Docs/designs/booking-confirmation-design.md)
 - [Postman API collection](Docs/collection/movie-ticketing-platform.postman_collection.json)

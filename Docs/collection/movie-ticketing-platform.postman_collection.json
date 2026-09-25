@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "84e91a08-64e2-4a75-bb55-6f163ce94c10",
     "name": "Movie Ticketing Platform API",
-    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity, Theatre Administration, Movie Catalogue and Shows, then Customer Seat Holds in order to populate JWT and resource ID variables. Empty folders under Future APIs are placeholders only.",
+    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity, Theatre Administration, Movie Catalogue and Shows, Customer Seat Holds, then Customer Bookings in order to populate JWT and resource ID variables. Empty folders under Future APIs are placeholders only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -101,6 +101,11 @@
     },
     {
       "key": "holdId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bookingId",
       "value": "",
       "type": "string"
     }
@@ -1175,7 +1180,108 @@
                 "{{holdId}}"
               ]
             },
-            "description": "Returns ACTIVE or EXPIRED for a hold owned by the authenticated customer."
+            "description": "Returns ACTIVE, EXPIRED, or CONVERTED for a hold owned by the authenticated customer."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customer Bookings",
+      "description": "Implemented CUSTOMER-only hold confirmation, owned booking detail, and owner-scoped booking-history APIs.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customerAccessToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Confirm Held Seats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Booking confirmed or replayed', function () { pm.expect([200, 201]).to.include(pm.response.code); });",
+                  "if ([200, 201].includes(pm.response.code)) { pm.collectionVariables.set('bookingId', pm.response.json().id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/holds/{{holdId}}/booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "holds",
+                "{{holdId}}",
+                "booking"
+              ]
+            },
+            "description": "Atomically converts the authenticated customer's active hold into one CONFIRMED booking. A retry returns the same booking."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Owned Booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}"
+              ]
+            },
+            "description": "Returns a confirmed booking only when it belongs to the authenticated customer."
+          },
+          "response": []
+        },
+        {
+          "name": "List My Booking History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Returns only the authenticated customer's bookings, newest first, with set-based seat counts."
           },
           "response": []
         }
@@ -1185,11 +1291,6 @@
       "name": "Future APIs (Placeholders Only)",
       "description": "Organizational placeholders for approved project scope. Add requests only after each API contract is designed, approved, and implemented.",
       "item": [
-        {
-          "name": "Bookings",
-          "description": "Placeholder only. Hold-to-booking conversion remains undesigned and unimplemented.",
-          "item": []
-        },
         {
           "name": "Show Pricing and Discounts",
           "description": "Placeholder only; no API contract is defined.",
@@ -1202,11 +1303,6 @@
         },
         {
           "name": "Cancellations and Refunds",
-          "description": "Placeholder only; no API contract is defined.",
-          "item": []
-        },
-        {
-          "name": "Booking History",
           "description": "Placeholder only; no API contract is defined.",
           "item": []
         },

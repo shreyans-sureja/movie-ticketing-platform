@@ -47,6 +47,8 @@ public class SecurityConfiguration {
                         .hasRole("CUSTOMER")
                         .requestMatchers("/api/v1/holds/**")
                         .hasRole("CUSTOMER")
+                        .requestMatchers("/api/v1/bookings", "/api/v1/bookings/**")
+                        .hasRole("CUSTOMER")
                         .requestMatchers(
                                 HttpMethod.GET,
                                 "/api/v1/cities",
