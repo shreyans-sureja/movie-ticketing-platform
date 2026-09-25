@@ -5,6 +5,12 @@ import com.dmg.movieticketing.identity.application.exception.AccountNotFoundExce
 import com.dmg.movieticketing.identity.application.exception.EmailAlreadyRegisteredException;
 import com.dmg.movieticketing.identity.application.exception.InvalidCredentialsException;
 import com.dmg.movieticketing.identity.application.exception.PasswordPolicyViolationException;
+import com.dmg.movieticketing.movie.application.MovieAlreadyExistsException;
+import com.dmg.movieticketing.movie.application.MovieNotFoundException;
+import com.dmg.movieticketing.show.application.AuditoriumHasNoSeatsException;
+import com.dmg.movieticketing.show.application.ShowNotFoundException;
+import com.dmg.movieticketing.show.application.ShowTimeConflictException;
+import com.dmg.movieticketing.show.application.TierPriceMismatchException;
 import com.dmg.movieticketing.theatre.application.AuditoriumNameConflictException;
 import com.dmg.movieticketing.theatre.application.AuditoriumNotFoundException;
 import com.dmg.movieticketing.theatre.application.DomainValidationException;
@@ -20,6 +26,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 
 import java.util.Comparator;
 import java.util.List;
@@ -69,6 +77,38 @@ public class GlobalExceptionHandler {
                         "The request body is missing or malformed.",
                         request.getRequestURI(),
                         "MALFORMED_REQUEST"
+                )
+        );
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    ResponseEntity<ApiProblem> handleMissingRequestParameter(
+            MissingServletRequestParameterException exception,
+            HttpServletRequest request
+    ) {
+        String field = exception.getParameterName();
+        return validationProblem(
+                request,
+                new FieldViolation(
+                        field,
+                        validationCode(field, "Required"),
+                        "Required request parameter is missing."
+                )
+        );
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ApiProblem> handleRequestParameterTypeMismatch(
+            MethodArgumentTypeMismatchException exception,
+            HttpServletRequest request
+    ) {
+        String field = exception.getName();
+        return validationProblem(
+                request,
+                new FieldViolation(
+                        field,
+                        validationCode(field, "Type"),
+                        "Request parameter has an invalid value."
                 )
         );
     }
@@ -241,21 +281,102 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(MovieAlreadyExistsException.class)
+    ResponseEntity<ApiProblem> handleMovieAlreadyExists(
+            MovieAlreadyExistsException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "movie-already-exists",
+                "Movie already exists",
+                exception.getMessage(),
+                request,
+                "MOVIE_ALREADY_EXISTS"
+        );
+    }
+
+    @ExceptionHandler(MovieNotFoundException.class)
+    ResponseEntity<ApiProblem> handleMovieNotFound(
+            MovieNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return notFound(
+                "movie-not-found",
+                "Movie not found",
+                exception.getMessage(),
+                request,
+                "MOVIE_NOT_FOUND"
+        );
+    }
+
+    @ExceptionHandler(ShowNotFoundException.class)
+    ResponseEntity<ApiProblem> handleShowNotFound(
+            ShowNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return notFound(
+                "show-not-found",
+                "Show not found",
+                exception.getMessage(),
+                request,
+                "SHOW_NOT_FOUND"
+        );
+    }
+
+    @ExceptionHandler(AuditoriumHasNoSeatsException.class)
+    ResponseEntity<ApiProblem> handleAuditoriumHasNoSeats(
+            AuditoriumHasNoSeatsException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "auditorium-has-no-seats",
+                "Auditorium has no seats",
+                exception.getMessage(),
+                request,
+                "AUDITORIUM_HAS_NO_SEATS"
+        );
+    }
+
+    @ExceptionHandler(ShowTimeConflictException.class)
+    ResponseEntity<ApiProblem> handleShowTimeConflict(
+            ShowTimeConflictException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "show-time-conflict",
+                "Show time conflict",
+                exception.getMessage(),
+                request,
+                "SHOW_TIME_CONFLICT"
+        );
+    }
+
+    @ExceptionHandler(TierPriceMismatchException.class)
+    ResponseEntity<ApiProblem> handleTierPriceMismatch(
+            TierPriceMismatchException exception,
+            HttpServletRequest request
+    ) {
+        ApiProblem problem = new ApiProblem(
+                "urn:movie-ticketing:problem:tier-price-mismatch",
+                "Invalid tier prices",
+                HttpStatus.BAD_REQUEST.value(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                "TIER_PRICE_MISMATCH",
+                List.of(new FieldViolation("tierPrices", "TIER_PRICE_MISMATCH", exception.getMessage()))
+        );
+        return problem(HttpStatus.BAD_REQUEST, problem);
+    }
+
     @ExceptionHandler(DomainValidationException.class)
     ResponseEntity<ApiProblem> handleDomainValidation(
             DomainValidationException exception,
             HttpServletRequest request
     ) {
-        ApiProblem problem = new ApiProblem(
-                "urn:movie-ticketing:problem:validation-failed",
-                "Invalid request",
-                HttpStatus.BAD_REQUEST.value(),
-                "One or more fields are invalid.",
-                request.getRequestURI(),
-                "VALIDATION_FAILED",
-                List.of(new FieldViolation(exception.getField(), exception.getCode(), exception.getMessage()))
+        return validationProblem(
+                request,
+                new FieldViolation(exception.getField(), exception.getCode(), exception.getMessage())
         );
-        return problem(HttpStatus.BAD_REQUEST, problem);
     }
 
     private String validationCode(String field, String beanValidationCode) {
@@ -268,6 +389,22 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ApiProblem> problem(HttpStatus status, ApiProblem problem) {
         return ResponseEntity.status(status).contentType(PROBLEM_JSON).body(problem);
+    }
+
+    private ResponseEntity<ApiProblem> validationProblem(
+            HttpServletRequest request,
+            FieldViolation violation
+    ) {
+        ApiProblem problem = new ApiProblem(
+                "urn:movie-ticketing:problem:validation-failed",
+                "Invalid request",
+                HttpStatus.BAD_REQUEST.value(),
+                "One or more fields are invalid.",
+                request.getRequestURI(),
+                "VALIDATION_FAILED",
+                List.of(violation)
+        );
+        return problem(HttpStatus.BAD_REQUEST, problem);
     }
 
     private ResponseEntity<ApiProblem> conflict(
@@ -283,6 +420,26 @@ public class GlobalExceptionHandler {
                         "urn:movie-ticketing:problem:" + type,
                         title,
                         HttpStatus.CONFLICT.value(),
+                        detail,
+                        request.getRequestURI(),
+                        code
+                )
+        );
+    }
+
+    private ResponseEntity<ApiProblem> notFound(
+            String type,
+            String title,
+            String detail,
+            HttpServletRequest request,
+            String code
+    ) {
+        return problem(
+                HttpStatus.NOT_FOUND,
+                ApiProblem.of(
+                        "urn:movie-ticketing:problem:" + type,
+                        title,
+                        HttpStatus.NOT_FOUND.value(),
                         detail,
                         request.getRequestURI(),
                         code

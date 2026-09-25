@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "84e91a08-64e2-4a75-bb55-6f163ce94c10",
     "name": "Movie Ticketing Platform API",
-    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity requests first to populate JWT variables, then Theatre Administration requests in order to populate resource IDs. Empty folders under Future APIs are placeholders only and contain no unimplemented contracts.",
+    "description": "Import-ready collection for the implemented movie-ticketing platform APIs. Run Identity, Theatre Administration, and Movie Catalogue and Shows requests in order to populate JWT and resource ID variables. Empty folders under Future APIs are placeholders only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -66,6 +66,26 @@
     },
     {
       "key": "auditoriumId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "movieId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "showId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "showStartsAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "showDate",
       "value": "",
       "type": "string"
     }
@@ -768,19 +788,287 @@
       ]
     },
     {
+      "name": "Movie Catalogue and Shows",
+      "description": "Implemented catalogue, owned show scheduling, public discovery, and show-seat availability APIs.",
+      "item": [
+        {
+          "name": "Admin Commands",
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{adminAccessToken}}",
+                "type": "string"
+              }
+            ]
+          },
+          "item": [
+            {
+              "name": "Create Movie",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Movie created', function () { pm.response.to.have.status(201); });",
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('movieId', pm.response.json().id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"The Last Signal {{$timestamp}}\",\n  \"durationMinutes\": 128,\n  \"languageCode\": \"hi\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/movies",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "movies"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Show",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const start = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);",
+                      "pm.collectionVariables.set('showStartsAt', start.toISOString());",
+                      "const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(start);",
+                      "const value = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]));",
+                      "pm.collectionVariables.set('showDate', `${value.year}-${value.month}-${value.day}`);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Show created', function () { pm.response.to.have.status(201); });",
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('showId', pm.response.json().id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"movieId\": \"{{movieId}}\",\n  \"startsAt\": \"{{showStartsAt}}\",\n  \"currency\": \"INR\",\n  \"tierPrices\": [\n    {\n      \"tier\": \"PREMIUM\",\n      \"amount\": 400.00\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/theatres/{{theatreId}}/auditoriums/{{auditoriumId}}/shows",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "theatres",
+                    "{{theatreId}}",
+                    "auditoriums",
+                    "{{auditoriumId}}",
+                    "shows"
+                  ]
+                },
+                "description": "Schedules a future show in the owned auditorium. The existing collection setup creates PREMIUM seats, so the exact tier-price set contains PREMIUM only."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Public Catalogue and Discovery",
+          "auth": {
+            "type": "noauth"
+          },
+          "item": [
+            {
+              "name": "Search Movies",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/movies?q=signal&languageCode=hi&page=0&size=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "movies"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "signal"
+                    },
+                    {
+                      "key": "languageCode",
+                      "value": "hi"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Movie",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "movies",
+                    "{{movieId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Search Upcoming Shows",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/shows?cityId={{cityId}}&movieId={{movieId}}&date={{showDate}}&page=0&size=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "shows"
+                  ],
+                  "query": [
+                    {
+                      "key": "cityId",
+                      "value": "{{cityId}}"
+                    },
+                    {
+                      "key": "movieId",
+                      "value": "{{movieId}}"
+                    },
+                    {
+                      "key": "date",
+                      "value": "{{showDate}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Interprets date in Asia/Kolkata and returns only shows that have not started. Each item includes minimumPrice, maximumPrice, and availableSeatCount loaded by the aggregate show-search query."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Show",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/shows/{{showId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "shows",
+                    "{{showId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Show Seats",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/shows/{{showId}}/seats",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "shows",
+                    "{{showId}}",
+                    "seats"
+                  ]
+                },
+                "description": "Returns showSeatId and a derived seatLabel. It never exposes physicalSeatId."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Future APIs (Placeholders Only)",
       "description": "Organizational placeholders for approved project scope. Add requests only after each API contract is designed, approved, and implemented.",
       "item": [
-        {
-          "name": "Movies and Shows",
-          "description": "Placeholder only; no API contract is defined.",
-          "item": []
-        },
-        {
-          "name": "Discovery and Seat Availability",
-          "description": "Placeholder only; no API contract is defined.",
-          "item": []
-        },
         {
           "name": "Seat Holds and Bookings",
           "description": "Placeholder only; no API contract is defined.",

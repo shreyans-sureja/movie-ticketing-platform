@@ -2,7 +2,7 @@
 
 A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
 
-The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, and the first theatre-administration slice are implemented. Movies, shows, booking, pricing, payments, refunds, and notifications remain future work.
+The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, and show-specific seat inventory are implemented. Holds, bookings, payments, refunds, and notifications remain future work.
 
 ## Implemented scope
 
@@ -27,14 +27,22 @@ The current implementation provides:
 - Atomic physical-seat row creation using row label, first seat number, seat count, and tier.
 - Owner-scoped physical-seat listing with response-only derived seat labels.
 - Database constraints and transactions preventing duplicate physical-seat coordinates, including concurrent row requests.
+- Minimal global movie creation by theatre administrators with public search and detail APIs.
+- Owner-checked show scheduling with final per-tier `BigDecimal` prices and ISO 4217 currency.
+- Transactional show-seat snapshot generation from physical auditorium seats.
+- Auditorium-row locking that prevents concurrent overlapping shows in the same auditorium while allowing independent auditoriums to schedule concurrently.
+- Public upcoming-show search by city, movie, and an `Asia/Kolkata` customer date.
+- One aggregate show-search query returns show details, minimum/maximum price, and available-seat count without per-show queries.
+- Public show detail and show-seat availability APIs using `showSeatId` and response-only derived seat labels.
+- UTC timestamp storage and an injected UTC `Clock` for application time.
 
-Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Booking concurrency will be designed around future show-specific seat inventory rather than the physical-seat layout.
+Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Future holds and bookings will operate on the implemented show-specific seat inventory rather than the physical-seat layout.
 
 ## Technology
 
 - Java 21
 - Spring Boot 3.5.16
-- Maven
+- Maven Wrapper 3.3.4 using Maven 3.9.11
 - PostgreSQL
 - Flyway
 - Spring Data JPA
@@ -60,6 +68,14 @@ src/main/java/com/dmg/movieticketing/
 |  |- api/             Theatre, auditorium, and physical-seat HTTP contracts
 |  |- application/     Owner-scoped create/list use cases
 |  `- domain/          Theatre hierarchy models and repositories
+|- movie/
+|  |- api/             Movie command and public query contracts
+|  |- application/     Catalogue creation, normalization, and search
+|  `- domain/          Minimal global movie model and repository
+|- show/
+|  |- api/             Scheduling, discovery, and seat-availability contracts
+|  |- application/     Ownership, locking, pricing, snapshots, and queries
+|  `- domain/          Show, tier-price, and show-seat models
 `- shared/api/         Common problem response handling
 
 src/main/resources/
@@ -72,9 +88,10 @@ src/main/resources/
 ### Prerequisites
 
 - JDK 21
-- Maven 3.6.3 or newer
 - PostgreSQL 16 or newer
 - A Docker-compatible runtime when running the PostgreSQL integration tests
+
+The repository includes Maven Wrapper scripts, so a separate Maven installation is not required. Use `./mvnw` on macOS/Linux or `mvnw.cmd` on Windows. The first run downloads the pinned Maven 3.9.11 distribution.
 
 ### Create the local database
 
@@ -107,7 +124,7 @@ Default JWT settings are:
 Start the application:
 
 ```bash
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
 Flyway applies the database migration and Hibernate validates the resulting schema. The API is available under `http://localhost:8080/api/v1`.
@@ -115,15 +132,15 @@ Flyway applies the database migration and Hibernate validates the resulting sche
 ## Running tests
 
 ```bash
-mvn test
+./mvnw test
 ```
 
-Unit tests run without external services. Identity and theatre-management integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
+Unit tests run without external services. Identity, theatre-management, and movie/show integration tests use PostgreSQL 16 through Testcontainers and require an active Docker-compatible runtime. When no compatible runtime is available, those tests are reported as skipped rather than using a different database engine.
 
 Run the complete build lifecycle with:
 
 ```bash
-mvn verify
+./mvnw verify
 ```
 
 ## Identity API
@@ -213,6 +230,8 @@ Errors use `application/problem+json`:
 
 Important identity error codes include `EMAIL_ALREADY_REGISTERED`, `INVALID_CREDENTIALS`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, and `FORBIDDEN`.
 
+Malformed JSON returns `400 MALFORMED_REQUEST`. Bean-validation failures, missing required query parameters, and incorrectly typed query parameters return `400 VALIDATION_FAILED` with field-level entries in `violations`. These errors use the same problem response envelope across identity, theatre, movie, and show APIs.
+
 ## City API
 
 City APIs are public and read-only. They can be called anonymously or by either account role.
@@ -272,6 +291,62 @@ The request creates `A1` through `A20` in one transaction. Only `rowLabel`, `sea
 
 Important theatre-management error codes include `CITY_NOT_FOUND`, `THEATRE_NOT_FOUND`, `AUDITORIUM_NOT_FOUND`, `THEATRE_NAME_CONFLICT`, `AUDITORIUM_NAME_CONFLICT`, and `SEAT_CONFLICT`.
 
+## Movie catalogue and show API
+
+Movie reads and show reads are public. Movie creation and show scheduling require `THEATRE_ADMIN`; show scheduling also verifies that the authenticated account owns the complete theatre/auditorium path.
+
+| Access | Method | Path | Purpose |
+|---|---|---|---|
+| `THEATRE_ADMIN` | `POST` | `/api/v1/movies` | Add a minimal global movie. |
+| Public | `GET` | `/api/v1/movies?q=&languageCode=&page=0&size=20` | Search movies. |
+| Public | `GET` | `/api/v1/movies/{movieId}` | View a movie. |
+| Owning `THEATRE_ADMIN` | `POST` | `/api/v1/theatres/{theatreId}/auditoriums/{auditoriumId}/shows` | Schedule a show and generate its seat inventory. |
+| Public | `GET` | `/api/v1/shows?cityId=&movieId=&date=&page=0&size=20` | Find upcoming shows. |
+| Public | `GET` | `/api/v1/shows/{showId}` | View show details and prices. |
+| Public | `GET` | `/api/v1/shows/{showId}/seats` | View show-seat prices and availability. |
+
+Create a movie:
+
+```json
+{
+  "title": "The Last Signal",
+  "durationMinutes": 128,
+  "languageCode": "hi"
+}
+```
+
+Titles are trimmed and repeated whitespace is collapsed. The case-insensitive title, normalized language, and runtime form the duplicate key.
+
+Create a show:
+
+```json
+{
+  "movieId": "2baed1c9-97d7-423b-9e46-9869acc07601",
+  "startsAt": "2026-10-03T18:30:00+05:30",
+  "currency": "INR",
+  "tierPrices": [
+    {
+      "tier": "REGULAR",
+      "amount": 250.00
+    },
+    {
+      "tier": "PREMIUM",
+      "amount": 400.00
+    }
+  ]
+}
+```
+
+The tier-price set must exactly match the tiers currently used by the auditorium. Monetary values use Java `BigDecimal` and PostgreSQL `NUMERIC(12,2)`, and one ISO 4217 currency is copied into the tier prices and show-seat snapshots. There is no dynamic pricing engine: an administrator controls weekday or weekend pricing by submitting final prices for each show.
+
+Show creation accepts only a future timestamp with an explicit offset. Timestamps are normalized, stored, and returned in UTC. Customer `date` values are interpreted in `Asia/Kolkata` only for calculating UTC search bounds. Search returns upcoming shows only, so a current-date query excludes shows that have already started.
+
+Show creation locks the target auditorium database row within the transaction, checks for overlapping half-open time ranges, and then inserts the show, prices, and all show seats atomically. The public seat response exposes `showSeatId`, not the internal physical-seat ID. `seatLabel` is generated from the snapshotted `rowLabel` and `seatNumber` and is not stored.
+
+The public `/shows` resource is backed by the `MovieShow` JPA entity and the `movie_show` table. Show search executes one aggregate content query for the page, including minimum price, maximum price, and available-seat count, plus at most one pagination count query when needed. The number of database queries therefore does not grow with the number of shows returned.
+
+Important catalogue/show error codes include `MOVIE_NOT_FOUND`, `MOVIE_ALREADY_EXISTS`, `SHOW_NOT_FOUND`, `SHOW_TIME_CONFLICT`, `AUDITORIUM_HAS_NO_SEATS`, and `TIER_PRICE_MISMATCH`.
+
 ## Confirmed identity decisions
 
 - Email is trimmed and lowercased for login and uniqueness. Provider-specific transformations are not applied.
@@ -288,10 +363,8 @@ Important theatre-management error codes include `CITY_NOT_FOUND`, `THEATRE_NOT_
 
 - Theatre, auditorium, and physical-seat updates, deactivation, and deletion.
 - Accessibility attributes and visual seat-map editing.
-- Movie and show management.
-- Show discovery and seat availability.
 - Time-bound seat holds and concurrency-safe booking.
-- Show-specific pricing rules and discount codes.
+- Dynamic show-pricing rules and discount codes.
 - Payments and booking confirmation.
 - Cancellation and configurable refunds.
 - Booking history.
@@ -303,6 +376,8 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 
 - [Agent instructions](Docs/AGENTS.md)
 - [Development prompts](Docs/Prompts.md)
+- [Skills used](Docs/skills_used.md)
 - [Identity and authentication design](Docs/designs/identity-authentication-design.md)
 - [Theatre administration design](Docs/designs/theatre-admin-management-design.md)
+- [Movie catalogue and show scheduling design](Docs/designs/movie-catalogue-and-show-scheduling-design.md)
 - [Postman API collection](Docs/collection/movie-ticketing-platform.postman_collection.json)

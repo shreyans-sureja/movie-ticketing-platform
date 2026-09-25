@@ -69,3 +69,46 @@
 ## Prompt 9
 
 > please create collection folder inside doc and add json collection which is postman import friendly for all the apis you have created and also for future apis. update agents.md for the same.
+
+## Prompt 10
+
+> Let's design movie-catalogue flow. Do not implement yet, just design.
+>
+> Theatre admins can add movies,  while customers and unauthenticated users as well can search and view them. Keep rating, cast, reviews, etc. out of scope for now. keep only necessary informations.
+>
+> Admin should be able to schedule movie only in threatre they own. Business logic should verify it. Each show should have final prices for the seat tiers with currency. For design simplicity, I do not want dynamic price engine and let admin control the pricing of weekend with prices for each individual show. Add this assumption in README.
+>
+> When show is created, generate show specif seat inventory from the auditorium physicall seat. Each show seat take snapshot of the physical seat id, label, tier, price and currency. Holds and booking must be on show seat and not on physical seats.
+>
+> create apis for customers to search movies, viewing a movie, search by city, movie and date, viewing a perticular show, and viewing show's seat and current availability.
+>
+> Do not design hold, booking ,etc part in this phase.
+
+## Prompt 11
+
+> Please help me with below points in design revision.
+>
+> - keep movie model small, genre, synopsis, original release date are unnecessary. Revisit duplicate movie check with new update.
+> - use bigdevimal and numeric (12,2) for monetary values in java and postgres. Store currency as well.
+> - Do not persist deriveed seatLabel, generate in response using rowlabel and seat number.
+> - Do not expose physical seat Id in response ofp public APIs. Hold and booking must be on showseatid in future.
+> - Store timestamps in UTC.
+> - Use an injected UTC clock instead of Instant.now() directly.
+> - Validate that show starts in future and exclude already started shows in result.
+> - Use Asia/Kolkata time for customer's date interpretation only. But we will not store time stamp in local time.
+> - Show search only returns upcoming shows. For a search on current local date, exclude shows that have already started.
+> - Handle conflict on concurrent show on same auditorium, using lock on that auditorium's databases row inside transcation and check it overlaps with requested time. shows on different auditorium can run at the same time. DO not use local java lock or postgres functionality for it.
+
+## Prompt 12
+
+> go ahead, implement the code
+
+## Prompt 13
+
+> help me to fix the below issues.
+>
+> 1. show search has N+1 query problem, load minimum price, maximum price and available seat count run in efficiently instead of 3 queries for each show.
+> 2. check for incorrect payload, missing params etc has standard error response
+> 3. I see documentation is still outdated for show design movie_show flow
+> 4. add maven wrapper and update readme to use ./mvnw
+> 5. add skills_used.md. Added used skills in that if no specified skills were used mention that.
