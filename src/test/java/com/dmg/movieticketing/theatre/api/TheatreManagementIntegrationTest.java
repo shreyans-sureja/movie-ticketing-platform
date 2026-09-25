@@ -51,6 +51,7 @@ class TheatreManagementIntegrationTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("app.security.jwt.secret", () -> JWT_SECRET);
+        registry.add("booking.hold-duration", () -> "PT5M");
     }
 
     @Autowired

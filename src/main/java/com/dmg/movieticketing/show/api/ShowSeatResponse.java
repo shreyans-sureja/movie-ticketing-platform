@@ -1,6 +1,6 @@
 package com.dmg.movieticketing.show.api;
 
-import com.dmg.movieticketing.show.domain.ShowSeat;
+import com.dmg.movieticketing.show.application.ShowSeatView;
 import com.dmg.movieticketing.show.domain.ShowSeatAvailability;
 import com.dmg.movieticketing.theatre.domain.SeatTier;
 
@@ -16,7 +16,8 @@ public record ShowSeatResponse(
         ShowSeatAvailability availability
 ) {
 
-    public static ShowSeatResponse from(ShowSeat seat) {
+    public static ShowSeatResponse from(ShowSeatView view) {
+        var seat = view.seat();
         return new ShowSeatResponse(
                 seat.getId(),
                 seat.getRowLabel(),
@@ -24,7 +25,7 @@ public record ShowSeatResponse(
                 seat.getRowLabel() + seat.getSeatNumber(),
                 seat.getTier(),
                 new MoneyResponse(seat.getPrice(), seat.getCurrency()),
-                seat.getAvailabilityStatus()
+                view.availability()
         );
     }
 }

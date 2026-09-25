@@ -3,6 +3,8 @@ package com.dmg.movieticketing.show.api;
 import com.dmg.movieticketing.identity.api.SignInRequest;
 import com.dmg.movieticketing.identity.api.SignupRequest;
 import com.dmg.movieticketing.identity.domain.UserAccountRepository;
+import com.dmg.movieticketing.hold.domain.SeatHoldItemRepository;
+import com.dmg.movieticketing.hold.domain.SeatHoldRepository;
 import com.dmg.movieticketing.movie.domain.MovieRepository;
 import com.dmg.movieticketing.show.domain.MovieShowRepository;
 import com.dmg.movieticketing.show.domain.ShowSeatRepository;
@@ -61,6 +63,7 @@ class MovieAndShowIntegrationTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("app.security.jwt.secret", () -> JWT_SECRET);
+        registry.add("booking.hold-duration", () -> "PT5M");
     }
 
     @Autowired
@@ -71,6 +74,12 @@ class MovieAndShowIntegrationTest {
 
     @Autowired
     private ShowSeatRepository showSeatRepository;
+
+    @Autowired
+    private SeatHoldItemRepository seatHoldItemRepository;
+
+    @Autowired
+    private SeatHoldRepository seatHoldRepository;
 
     @Autowired
     private ShowTierPriceRepository showTierPriceRepository;
@@ -98,7 +107,9 @@ class MovieAndShowIntegrationTest {
 
     @BeforeEach
     void clearOperationalData() {
+        seatHoldItemRepository.deleteAllInBatch();
         showSeatRepository.deleteAllInBatch();
+        seatHoldRepository.deleteAllInBatch();
         showTierPriceRepository.deleteAllInBatch();
         movieShowRepository.deleteAllInBatch();
         movieRepository.deleteAllInBatch();
@@ -278,6 +289,176 @@ class MovieAndShowIntegrationTest {
                 .andExpect(jsonPath("$.violations[0].code").value("DATE_TYPE"));
     }
 
+    @Test
+    void customerHoldIsOwnerScopedAllOrNothingAndExpiryAware() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "hold-admin@example.com",
+                "administrator-password"
+        );
+        String firstCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-customer-one@example.com",
+                "customer-password"
+        );
+        String secondCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-customer-two@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Hold Film", 120, "hi");
+        String theatreId = createTheatre(adminToken, "Hold Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        Instant startsAt = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+        String showId = createShow(adminToken, theatreId, auditoriumId, movieId, startsAt);
+        List<String> seatIds = showSeatIds(showId);
+
+        String holdResponse = mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(firstCustomerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(seatIds.subList(0, 2))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.seats.length()").value(2))
+                .andExpect(jsonPath("$.seats[0].showSeatId").value(seatIds.get(0)))
+                .andExpect(jsonPath("$.seats[0].seatLabel").value("A1"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String holdId = objectMapper.readTree(holdResponse).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/holds/{holdId}", holdId)
+                        .header("Authorization", bearer(firstCustomerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        mockMvc.perform(get("/api/v1/holds/{holdId}", holdId)
+                        .header("Authorization", bearer(secondCustomerToken)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(List.of(seatIds.get(2)))))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(secondCustomerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(List.of(seatIds.get(1), seatIds.get(2)))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SEATS_UNAVAILABLE"));
+
+        assertThat(seatHoldRepository.count()).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].availability").value("HELD"))
+                .andExpect(jsonPath("$.items[1].availability").value("HELD"))
+                .andExpect(jsonPath("$.items[2].availability").value("AVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableSeatCount").value(1));
+
+        String localDate = startsAt.atZone(KOLKATA).toLocalDate().toString();
+        mockMvc.perform(get("/api/v1/shows")
+                        .param("cityId", "7")
+                        .param("movieId", movieId)
+                        .param("date", localDate))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].availableSeatCount").value(1));
+
+        jdbcTemplate.update(
+                """
+                UPDATE seat_hold
+                SET created_at = CURRENT_TIMESTAMP - INTERVAL '10 minutes',
+                    expires_at = CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+                WHERE id = ?
+                """,
+                UUID.fromString(holdId)
+        );
+
+        mockMvc.perform(get("/api/v1/holds/{holdId}", holdId)
+                        .header("Authorization", bearer(firstCustomerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EXPIRED"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].availability").value("AVAILABLE"))
+                .andExpect(jsonPath("$.items[1].availability").value("AVAILABLE"));
+
+        mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(secondCustomerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(List.of(seatIds.get(0)))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void overlappingConcurrentHoldRequestsHaveOneAtomicWinner() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "hold-race-admin@example.com",
+                "administrator-password"
+        );
+        String firstCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-race-one@example.com",
+                "customer-password"
+        );
+        String secondCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-race-two@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Hold Race Film", 120, "en");
+        String theatreId = createTheatre(adminToken, "Hold Race Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        String showId = createShow(
+                adminToken,
+                theatreId,
+                auditoriumId,
+                movieId,
+                Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)
+        );
+        List<String> seatIds = showSeatIds(showId);
+
+        CountDownLatch start = new CountDownLatch(1);
+        List<Integer> results;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> first = executor.submit(() -> createHoldAfter(
+                    start,
+                    firstCustomerToken,
+                    showId,
+                    List.of(seatIds.get(0), seatIds.get(1))
+            ));
+            Future<Integer> second = executor.submit(() -> createHoldAfter(
+                    start,
+                    secondCustomerToken,
+                    showId,
+                    List.of(seatIds.get(2), seatIds.get(1))
+            ));
+            start.countDown();
+            results = List.of(first.get(), second.get());
+        }
+
+        assertThat(results).containsExactlyInAnyOrder(201, 409);
+        assertThat(seatHoldRepository.count()).isEqualTo(1);
+        assertThat(seatHoldItemRepository.count()).isEqualTo(2);
+        Integer heldSeats = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM show_seat WHERE availability_status = 'HELD'",
+                Integer.class
+        );
+        assertThat(heldSeats).isEqualTo(2);
+    }
+
     private List<Integer> createShowsConcurrently(
             String token,
             String theatreId,
@@ -328,6 +509,37 @@ class MovieAndShowIntegrationTest {
                 .andReturn()
                 .getResponse()
                 .getStatus();
+    }
+
+    private int createHoldAfter(
+            CountDownLatch start,
+            String token,
+            String showId,
+            List<String> showSeatIds
+    ) throws Exception {
+        start.await();
+        return mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(showSeatIds)))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+    }
+
+    private List<String> showSeatIds(String showId) throws Exception {
+        String response = mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        List<String> ids = new java.util.ArrayList<>();
+        objectMapper.readTree(response).get("items").forEach(item -> ids.add(item.get("showSeatId").asText()));
+        return List.copyOf(ids);
+    }
+
+    private String holdBody(List<String> showSeatIds) throws Exception {
+        return objectMapper.writeValueAsString(Map.of("showSeatIds", showSeatIds));
     }
 
     private String signupAndSignIn(String signupPath, String email, String password) throws Exception {

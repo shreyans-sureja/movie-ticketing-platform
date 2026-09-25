@@ -1,6 +1,9 @@
 package com.dmg.movieticketing.shared.api;
 
 import com.dmg.movieticketing.city.application.CityNotFoundException;
+import com.dmg.movieticketing.hold.application.HoldNotFoundException;
+import com.dmg.movieticketing.hold.application.SeatsUnavailableException;
+import com.dmg.movieticketing.hold.application.ShowAlreadyStartedException;
 import com.dmg.movieticketing.identity.application.exception.AccountNotFoundException;
 import com.dmg.movieticketing.identity.application.exception.EmailAlreadyRegisteredException;
 import com.dmg.movieticketing.identity.application.exception.InvalidCredentialsException;
@@ -366,6 +369,48 @@ public class GlobalExceptionHandler {
                 List.of(new FieldViolation("tierPrices", "TIER_PRICE_MISMATCH", exception.getMessage()))
         );
         return problem(HttpStatus.BAD_REQUEST, problem);
+    }
+
+    @ExceptionHandler(HoldNotFoundException.class)
+    ResponseEntity<ApiProblem> handleHoldNotFound(
+            HoldNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return notFound(
+                "hold-not-found",
+                "Hold not found",
+                exception.getMessage(),
+                request,
+                "HOLD_NOT_FOUND"
+        );
+    }
+
+    @ExceptionHandler(SeatsUnavailableException.class)
+    ResponseEntity<ApiProblem> handleSeatsUnavailable(
+            SeatsUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "seats-unavailable",
+                "Seats unavailable",
+                exception.getMessage(),
+                request,
+                "SEATS_UNAVAILABLE"
+        );
+    }
+
+    @ExceptionHandler(ShowAlreadyStartedException.class)
+    ResponseEntity<ApiProblem> handleShowAlreadyStarted(
+            ShowAlreadyStartedException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "show-already-started",
+                "Show already started",
+                exception.getMessage(),
+                request,
+                "SHOW_ALREADY_STARTED"
+        );
     }
 
     @ExceptionHandler(DomainValidationException.class)

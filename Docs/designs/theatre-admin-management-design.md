@@ -1,7 +1,7 @@
 # Theatre Administration Design
 
 **Status:** Approved and implemented  
-**Last updated:** 2026-09-23  
+**Last updated:** 2026-09-25
 **Depends on:** [Identity and Authentication Design](identity-authentication-design.md)
 
 ## 1. Purpose
@@ -61,7 +61,7 @@ In this document, **admin** means a theatre administrator. The canonical account
 - Multiple owners, delegated theatre managers, or staff permissions.
 - Adding, editing, or deleting cities through an API.
 - Movies, shows, schedules, seat inventory, holds, bookings, and payments.
-- Booking concurrency control. It will be designed with show-specific seat inventory rather than the immutable physical-seat layout.
+- Hold and booking concurrency control. Customer holds are implemented separately against show-specific seat inventory; booking remains undesigned.
 - Prices on physical seats, including weekday, weekend, holiday, surge, or show-specific prices.
 - Accessibility attributes. A later independent flag or attribute may mark a seat accessible regardless of its tier.
 - Seat-map images, coordinates, aisles, gaps, and a visual layout editor.
@@ -150,7 +150,7 @@ flowchart LR
     K[Flyway migrations] --> J
 ```
 
-### 6.1 Proposed package responsibilities
+### 6.1 Package responsibilities
 
 The implementation separates the following package responsibilities:
 
@@ -690,7 +690,7 @@ This management design does not attempt to solve booking concurrency. It does es
 - Concurrent overlapping row requests cannot create duplicates because the database unique constraint is authoritative.
 - A uniqueness failure rolls back the entire row request and returns `409 SEAT_CONFLICT`.
 
-Future show creation will snapshot or reference these stable physical seats to create show-specific sellable inventory. Seat holds and bookings must synchronize on that show-specific inventory, not on `physical_seat`.
+The implemented show-scheduling flow snapshots these stable physical seats into show-specific sellable inventory. The separate [customer seat hold design](customer-seat-hold-design.md) synchronizes on that show inventory, not on `physical_seat`; booking remains a future design.
 
 ## 18. Error Contract
 
@@ -729,7 +729,7 @@ The implementation uses separate append-only migrations:
 
 Migration version numbers will be chosen after inspecting the migrations present at implementation time. The seed is deterministic and does not call an external service.
 
-Proposed indexes and constraints:
+Indexes and constraints:
 
 - Unique case-insensitive `(city.name, city.state_or_ut)`.
 - `theatre(owner_account_id, name, id)` for stable owned listings.
