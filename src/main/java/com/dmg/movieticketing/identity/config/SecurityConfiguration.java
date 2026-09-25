@@ -43,7 +43,17 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/admins/signup",
                                 "/api/v1/auth/signin"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/cities", "/api/v1/cities/**").permitAll()
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/v1/cities",
+                                "/api/v1/cities/**",
+                                "/api/v1/movies",
+                                "/api/v1/movies/**",
+                                "/api/v1/shows",
+                                "/api/v1/shows/**"
+                        ).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/movies")
+                        .hasRole("THEATRE_ADMIN")
                         .requestMatchers("/api/v1/theatres", "/api/v1/theatres/**")
                         .hasRole("THEATRE_ADMIN")
                         .anyRequest().authenticated()
