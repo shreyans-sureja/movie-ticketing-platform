@@ -23,6 +23,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+/**
+ * Implements owner-scoped theatre, auditorium, and physical-seat management.
+ */
 @Service
 public class TheatreManagementService {
 
@@ -82,6 +85,7 @@ public class TheatreManagementService {
         try {
             return theatreRepository.saveAndFlush(theatre);
         } catch (DataIntegrityViolationException exception) {
+            // The database constraint closes the race between the friendly pre-check and insert.
             throw new TheatreNameConflictException(exception);
         }
     }
@@ -111,6 +115,7 @@ public class TheatreManagementService {
             Auditorium saved = auditoriumRepository.saveAndFlush(auditorium);
             return toDetails(saved, 0);
         } catch (DataIntegrityViolationException exception) {
+            // Translate a concurrent duplicate insert into the same stable application error.
             throw new AuditoriumNameConflictException(exception);
         }
     }
@@ -126,6 +131,9 @@ public class TheatreManagementService {
                 .toList();
     }
 
+    /**
+     * Generates a contiguous row of physical seats atomically for an owned auditorium.
+     */
     @Transactional
     public SeatRowCreation createSeatRow(
             UUID accountId,
@@ -173,6 +181,7 @@ public class TheatreManagementService {
                     List.copyOf(saved)
             );
         } catch (DataIntegrityViolationException exception) {
+            // Uniqueness remains authoritative when two overlapping row requests race.
             throw new SeatConflictException(exception);
         }
     }
@@ -195,6 +204,7 @@ public class TheatreManagementService {
     }
 
     private int calculateLastSeatNumber(int firstSeatNumber, int seatCount) {
+        // Compute as long so a large count cannot wrap an int before range validation.
         long lastSeatNumber = (long) firstSeatNumber + seatCount - 1;
         if (lastSeatNumber > MAX_SEAT_NUMBER) {
             throw new DomainValidationException(

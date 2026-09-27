@@ -43,6 +43,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Schedules shows, snapshots their sellable seats, and serves public discovery data.
+ */
 @Service
 public class ShowService {
 
@@ -80,6 +83,10 @@ public class ShowService {
         this.clock = clock;
     }
 
+    /**
+     * Creates one future show in an owned auditorium with complete pricing for
+     * every physical-seat tier present in that auditorium.
+     */
     @Transactional
     public ShowDetails createShow(
             UUID accountId,
@@ -92,6 +99,7 @@ public class ShowService {
     ) {
         theatreRepository.findByIdAndOwnerAccountId(theatreId, accountId)
                 .orElseThrow(TheatreNotFoundException::new);
+        // Locking the auditorium serializes overlap checks only for this auditorium.
         Auditorium auditorium = auditoriumRepository.findByIdAndTheatreIdForUpdate(auditoriumId, theatreId)
                 .orElseThrow(AuditoriumNotFoundException::new);
         Movie movie = movieRepository.findById(movieId).orElseThrow(MovieNotFoundException::new);
@@ -115,6 +123,7 @@ public class ShowService {
         Map<SeatTier, BigDecimal> prices = validateTierPrices(physicalSeats, tierPriceInputs);
         Instant endsAt = startsAt.plus(movie.getDurationMinutes(), ChronoUnit.MINUTES);
 
+        // This check is safe from concurrent inserts because the auditorium row is still locked.
         if (movieShowRepository.existsByAuditoriumIdAndStartsAtLessThanAndEndsAtGreaterThan(
                 auditoriumId,
                 endsAt,
@@ -145,6 +154,7 @@ public class ShowService {
                 .toList();
         showTierPriceRepository.saveAll(tierPrices);
 
+        // Snapshot layout and final price so later physical-seat changes cannot alter this show.
         List<ShowSeat> showSeats = new ArrayList<>(physicalSeats.size());
         for (PhysicalSeat physicalSeat : physicalSeats) {
             showSeats.add(ShowSeat.create(
@@ -161,6 +171,9 @@ public class ShowService {
         return new ShowDetails(show, List.copyOf(tierPrices), showSeats.size(), showSeats.size());
     }
 
+    /**
+     * Searches upcoming shows for a customer date interpreted in Asia/Kolkata.
+     */
     @Transactional(readOnly = true)
     public Page<ShowSearchItem> searchShows(
             long cityId,
@@ -181,6 +194,7 @@ public class ShowService {
             return new PageImpl<>(List.of(), pageable, 0);
         }
 
+        // Convert only the search boundary to UTC; persisted timestamps remain UTC instants.
         Instant dayStart = date.atStartOfDay(CUSTOMER_ZONE).toInstant();
         Instant dayEnd = date.plusDays(1).atStartOfDay(CUSTOMER_ZONE).toInstant();
         return movieShowRepository.searchUpcoming(
@@ -254,6 +268,7 @@ public class ShowService {
             }
         }
 
+        // Exact equality prevents creating show seats with a missing or irrelevant tier price.
         if (!prices.keySet().equals(requiredTiers)) {
             throw new TierPriceMismatchException();
         }

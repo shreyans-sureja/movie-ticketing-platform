@@ -10,6 +10,7 @@ public record ShowSeatAvailabilityData(
         Instant currentHoldExpiresAt
 ) {
 
+    /** Derives availability lazily so correctness does not depend on an expiry scheduler. */
     public ShowSeatAvailability effectiveAvailabilityAt(Instant requestNow) {
         if (seat.getAvailabilityStatus() == ShowSeatAvailability.AVAILABLE) {
             return ShowSeatAvailability.AVAILABLE;

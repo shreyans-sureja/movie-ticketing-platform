@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 
+/** Enforces the byte-length limit beyond which BCrypt would silently truncate passwords. */
 @Component
 public class PasswordPolicy {
 
@@ -18,4 +19,3 @@ public class PasswordPolicy {
         }
     }
 }
-

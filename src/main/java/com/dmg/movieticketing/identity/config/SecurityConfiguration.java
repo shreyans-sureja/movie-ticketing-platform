@@ -14,6 +14,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
+/**
+ * Defines stateless API authorization rules and JWT resource-server behavior.
+ */
 @Configuration
 public class SecurityConfiguration {
 

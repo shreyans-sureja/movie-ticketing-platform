@@ -16,6 +16,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Show-specific snapshot of a physical seat, including its final price and current sale ownership.
+ */
 @Entity
 @Table(name = "show_seat")
 public class ShowSeat {
@@ -94,6 +97,7 @@ public class ShowSeat {
             String currency,
             Instant createdAt
     ) {
+        // Snapshot mutable auditorium layout fields; booking never relies on the physical seat later.
         return new ShowSeat(
                 id,
                 show,
@@ -147,18 +151,21 @@ public class ShowSeat {
         return currentBookingId;
     }
 
+    /** Transfers effective ownership to a hold, including when replacing an expired hold pointer. */
     public void assignHold(UUID holdId) {
         this.availabilityStatus = ShowSeatAvailability.HELD;
         this.currentHoldId = holdId;
         this.currentBookingId = null;
     }
 
+    /** Converts held ownership to booked ownership. */
     public void confirmBooking(UUID bookingId) {
         this.availabilityStatus = ShowSeatAvailability.BOOKED;
         this.currentHoldId = null;
         this.currentBookingId = bookingId;
     }
 
+    /** Releases a cancelled booking's seat back to the available pool. */
     public void releaseBooking() {
         this.availabilityStatus = ShowSeatAvailability.AVAILABLE;
         this.currentHoldId = null;

@@ -14,12 +14,17 @@ import java.util.UUID;
 
 public interface MovieShowRepository extends JpaRepository<MovieShow, UUID> {
 
+    /** Tests half-open interval overlap: existing start &lt; requested end and existing end &gt; requested start. */
     boolean existsByAuditoriumIdAndStartsAtLessThanAndEndsAtGreaterThan(
             UUID auditoriumId,
             Instant requestedEnd,
             Instant requestedStart
     );
 
+    /**
+     * Returns upcoming shows and their min/max price and effective availability
+     * in one aggregate query, avoiding per-show seat queries.
+     */
     @Query(
             value = """
             SELECT new com.dmg.movieticketing.show.application.ShowSearchItem(
@@ -93,6 +98,7 @@ public interface MovieShowRepository extends JpaRepository<MovieShow, UUID> {
             Pageable pageable
     );
 
+    /** Fetches the relationships required by the public show response in the same query. */
     @Override
     @EntityGraph(attributePaths = {"movie", "auditorium", "auditorium.theatre", "auditorium.theatre.city"})
     Optional<MovieShow> findById(UUID id);

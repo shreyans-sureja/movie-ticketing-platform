@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 
+/**
+ * Authenticates email/password credentials and issues the configured access-token representation.
+ */
 @Service
 public class AuthenticationService {
 

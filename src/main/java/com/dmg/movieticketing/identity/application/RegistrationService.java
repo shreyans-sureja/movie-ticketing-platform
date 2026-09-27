@@ -13,6 +13,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Registers customer and theatre-admin accounts in the shared account table.
+ */
 @Service
 public class RegistrationService {
 
@@ -67,6 +70,7 @@ public class RegistrationService {
             UserAccount saved = accountRepository.saveAndFlush(account);
             return toResult(saved);
         } catch (DataIntegrityViolationException exception) {
+            // The unique email constraint handles concurrent registrations that both pass the pre-check.
             throw new EmailAlreadyRegisteredException(exception);
         }
     }
@@ -81,4 +85,3 @@ public class RegistrationService {
         );
     }
 }
-

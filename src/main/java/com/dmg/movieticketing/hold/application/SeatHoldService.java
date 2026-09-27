@@ -26,6 +26,10 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Acquires temporary, all-or-nothing seat holds and derives their current status.
+ * Expiry is evaluated from persisted hold timestamps rather than a cleanup job.
+ */
 @Service
 public class SeatHoldService {
 
@@ -55,8 +59,12 @@ public class SeatHoldService {
         this.holdConversionLookup = holdConversionLookup;
     }
 
+    /**
+     * Holds every requested show seat or fails without holding any of them.
+     */
     @Transactional
     public HoldDetails createHold(UUID customerAccountId, UUID showId, List<UUID> requestedShowSeatIds) {
+        // Sorting gives every transaction the same PostgreSQL row-lock order and avoids deadlocks.
         List<UUID> showSeatIds = validateAndSortSeatIds(requestedShowSeatIds);
         MovieShow show = movieShowRepository.findById(showId).orElseThrow(ShowNotFoundException::new);
 
@@ -70,6 +78,7 @@ public class SeatHoldService {
             throw new SeatsUnavailableException();
         }
 
+        // A stored HELD seat becomes reusable as soon as its referenced hold has expired.
         Map<UUID, SeatHold> currentHolds = loadCurrentHolds(lockedSeats);
         boolean allAvailable = lockedSeats.stream()
                 .allMatch(seat -> isEffectivelyAvailable(seat, currentHolds, acquiredAt));
@@ -96,6 +105,9 @@ public class SeatHoldService {
         return new HoldDetails(hold, HoldStatus.ACTIVE, orderForResponse(lockedSeats));
     }
 
+    /**
+     * Returns the owner-scoped hold with a status derived at read time.
+     */
     @Transactional(readOnly = true)
     public HoldDetails getHold(UUID customerAccountId, UUID holdId) {
         SeatHold hold = seatHoldRepository.findByIdAndCustomerAccountId(holdId, customerAccountId)

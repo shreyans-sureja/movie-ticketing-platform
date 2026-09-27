@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
+/** Validated external configuration for the lifetime of a seat hold. */
 @ConfigurationProperties(prefix = "booking")
 public record HoldProperties(Duration holdDuration) {
 

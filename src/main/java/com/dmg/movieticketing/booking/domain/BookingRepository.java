@@ -19,6 +19,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     Optional<Booking> findByIdAndCustomerAccountId(UUID id, UUID customerAccountId);
 
+    /** Locks an owner-scoped booking to serialize cancellation attempts. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT booking
@@ -33,6 +34,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     boolean existsBySourceHoldId(UUID sourceHoldId);
 
+    /** Projects paged history with seat counts in one grouped query. */
     @Query(
             value = """
             SELECT new com.dmg.movieticketing.booking.application.BookingHistoryItem(
