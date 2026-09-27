@@ -4,6 +4,7 @@ import com.dmg.movieticketing.booking.domain.Booking;
 import com.dmg.movieticketing.booking.domain.BookingItem;
 import com.dmg.movieticketing.booking.domain.BookingItemRepository;
 import com.dmg.movieticketing.booking.domain.BookingRepository;
+import com.dmg.movieticketing.booking.domain.BookingStatus;
 import com.dmg.movieticketing.hold.application.HoldNotFoundException;
 import com.dmg.movieticketing.hold.application.ShowAlreadyStartedException;
 import com.dmg.movieticketing.hold.domain.SeatHold;
@@ -102,6 +103,37 @@ public class BookingService {
         );
     }
 
+    @Transactional
+    public BookingDetails cancel(UUID customerAccountId, UUID bookingId) {
+        Booking booking = bookingRepository.findOwnedForUpdate(bookingId, customerAccountId)
+                .orElseThrow(BookingNotFoundException::new);
+
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            return loadDetails(booking);
+        }
+
+        long itemCount = bookingItemRepository.countForBooking(bookingId);
+        List<ShowSeat> seats = showSeatRepository.findAllForCancellationUpdate(bookingId);
+        if (itemCount == 0 || seats.size() != itemCount) {
+            throw new BookingNoLongerOwnsSeatsException();
+        }
+
+        Instant cancelledAt = clock.instant();
+        if (!cancelledAt.isBefore(seats.getFirst().getShow().getStartsAt())) {
+            throw new ShowAlreadyStartedException();
+        }
+        if (seats.stream().anyMatch(seat -> !isOwnedBy(seat, booking))) {
+            throw new BookingNoLongerOwnsSeatsException();
+        }
+
+        booking.cancel(cancelledAt);
+        seats.forEach(ShowSeat::releaseBooking);
+        bookingRepository.save(booking);
+        showSeatRepository.saveAllAndFlush(seats);
+
+        return loadDetails(booking);
+    }
+
     @Transactional(readOnly = true)
     public BookingDetails getOwnedBooking(UUID customerAccountId, UUID bookingId) {
         Booking booking = bookingRepository.findByIdAndCustomerAccountId(bookingId, customerAccountId)
@@ -125,6 +157,13 @@ public class BookingService {
         return seat.getShow().getId().equals(hold.getShow().getId())
                 && seat.getAvailabilityStatus() == ShowSeatAvailability.HELD
                 && hold.getId().equals(seat.getCurrentHoldId());
+    }
+
+    private boolean isOwnedBy(ShowSeat seat, Booking booking) {
+        return seat.getShow().getId().equals(booking.getShowId())
+                && seat.getAvailabilityStatus() == ShowSeatAvailability.BOOKED
+                && booking.getId().equals(seat.getCurrentBookingId())
+                && seat.getCurrentHoldId() == null;
     }
 
     private List<BookingItem> orderForResponse(List<BookingItem> items) {

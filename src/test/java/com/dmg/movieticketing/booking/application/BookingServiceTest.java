@@ -4,6 +4,7 @@ import com.dmg.movieticketing.booking.domain.Booking;
 import com.dmg.movieticketing.booking.domain.BookingItem;
 import com.dmg.movieticketing.booking.domain.BookingItemRepository;
 import com.dmg.movieticketing.booking.domain.BookingRepository;
+import com.dmg.movieticketing.booking.domain.BookingStatus;
 import com.dmg.movieticketing.hold.domain.SeatHold;
 import com.dmg.movieticketing.hold.domain.SeatHoldRepository;
 import com.dmg.movieticketing.show.domain.MovieShow;
@@ -163,6 +164,104 @@ class BookingServiceTest {
         verifyNoInteractions(bookingItemRepository);
     }
 
+    @Test
+    void cancelsBookingAndReleasesCompleteSeatSet() {
+        UUID customerId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UUID showId = UUID.randomUUID();
+        Booking booking = Booking.confirm(
+                bookingId,
+                UUID.randomUUID(),
+                showId,
+                customerId,
+                new BigDecimal("650.00"),
+                "INR",
+                NOW.minusSeconds(60)
+        );
+        MovieShow show = org.mockito.Mockito.mock(MovieShow.class);
+        ShowSeat firstSeat = bookedSeat(show, bookingId);
+        ShowSeat secondSeat = bookedSeat(show, bookingId);
+
+        when(show.getId()).thenReturn(showId);
+        when(show.getStartsAt()).thenReturn(NOW.plusSeconds(3600));
+        when(bookingRepository.findOwnedForUpdate(bookingId, customerId)).thenReturn(Optional.of(booking));
+        when(bookingItemRepository.countForBooking(bookingId)).thenReturn(2L);
+        when(showSeatRepository.findAllForCancellationUpdate(bookingId))
+                .thenReturn(List.of(firstSeat, secondSeat));
+        when(bookingItemRepository.findAllForBooking(bookingId)).thenReturn(List.of());
+
+        BookingDetails result = service.cancel(customerId, bookingId);
+
+        assertThat(result.booking()).isSameAs(booking);
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.getCancelledAt()).isEqualTo(NOW);
+        verify(firstSeat).releaseBooking();
+        verify(secondSeat).releaseBooking();
+        InOrder writes = inOrder(bookingRepository, showSeatRepository);
+        writes.verify(bookingRepository).save(booking);
+        writes.verify(showSeatRepository).saveAllAndFlush(List.of(firstSeat, secondSeat));
+    }
+
+    @Test
+    void duplicateCancellationReturnsExistingBookingWithoutLockingSeatsAgain() {
+        UUID customerId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = org.mockito.Mockito.mock(Booking.class);
+
+        when(booking.getId()).thenReturn(bookingId);
+        when(booking.getStatus()).thenReturn(BookingStatus.CANCELLED);
+        when(bookingRepository.findOwnedForUpdate(bookingId, customerId)).thenReturn(Optional.of(booking));
+        when(bookingItemRepository.findAllForBooking(bookingId)).thenReturn(List.of());
+
+        BookingDetails result = service.cancel(customerId, bookingId);
+
+        assertThat(result.booking()).isSameAs(booking);
+        verify(showSeatRepository, never()).findAllForCancellationUpdate(any());
+        verify(bookingItemRepository, never()).countForBooking(any());
+        verify(bookingRepository, never()).save(any());
+    }
+
+    @Test
+    void cancellationAtExactShowStartRejectsBeforeWrites() {
+        UUID customerId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = org.mockito.Mockito.mock(Booking.class);
+        MovieShow show = org.mockito.Mockito.mock(MovieShow.class);
+        ShowSeat seat = org.mockito.Mockito.mock(ShowSeat.class);
+
+        when(booking.getStatus()).thenReturn(BookingStatus.CONFIRMED);
+        when(seat.getShow()).thenReturn(show);
+        when(show.getStartsAt()).thenReturn(NOW);
+        when(bookingRepository.findOwnedForUpdate(bookingId, customerId)).thenReturn(Optional.of(booking));
+        when(bookingItemRepository.countForBooking(bookingId)).thenReturn(1L);
+        when(showSeatRepository.findAllForCancellationUpdate(bookingId)).thenReturn(List.of(seat));
+
+        assertThatThrownBy(() -> service.cancel(customerId, bookingId))
+                .isInstanceOf(com.dmg.movieticketing.hold.application.ShowAlreadyStartedException.class);
+
+        verify(booking, never()).cancel(any());
+        verify(seat, never()).releaseBooking();
+        verify(bookingRepository, never()).save(any());
+    }
+
+    @Test
+    void incompleteCancellationSeatSetRejectsBeforeWrites() {
+        UUID customerId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = org.mockito.Mockito.mock(Booking.class);
+
+        when(booking.getStatus()).thenReturn(BookingStatus.CONFIRMED);
+        when(bookingRepository.findOwnedForUpdate(bookingId, customerId)).thenReturn(Optional.of(booking));
+        when(bookingItemRepository.countForBooking(bookingId)).thenReturn(2L);
+        when(showSeatRepository.findAllForCancellationUpdate(bookingId)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.cancel(customerId, bookingId))
+                .isInstanceOf(BookingNoLongerOwnsSeatsException.class);
+
+        verify(booking, never()).cancel(any());
+        verify(bookingRepository, never()).save(any());
+    }
+
     private ShowSeat ownedSeat(MovieShow show, UUID holdId, String price) {
         ShowSeat seat = org.mockito.Mockito.mock(ShowSeat.class);
         when(seat.getId()).thenReturn(UUID.randomUUID());
@@ -172,6 +271,14 @@ class BookingServiceTest {
         when(seat.getCurrentHoldId()).thenReturn(holdId);
         when(seat.getCurrency()).thenReturn("INR");
         when(seat.getPrice()).thenReturn(new BigDecimal(price));
+        return seat;
+    }
+
+    private ShowSeat bookedSeat(MovieShow show, UUID bookingId) {
+        ShowSeat seat = org.mockito.Mockito.mock(ShowSeat.class);
+        when(seat.getShow()).thenReturn(show);
+        when(seat.getAvailabilityStatus()).thenReturn(ShowSeatAvailability.BOOKED);
+        when(seat.getCurrentBookingId()).thenReturn(bookingId);
         return seat;
     }
 }

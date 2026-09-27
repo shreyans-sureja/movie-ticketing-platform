@@ -478,7 +478,7 @@ class MovieAndShowIntegrationTest {
     }
 
     @Test
-    void customerConfirmsOwnedHoldReadsBookingAndSeesOnlyOwnedHistory() throws Exception {
+    void customerConfirmsAndCancelsOwnedBookingWithHistoryAndAvailabilityUpdates() throws Exception {
         String adminToken = signupAndSignIn(
                 "/api/v1/auth/admins/signup",
                 "booking-admin@example.com",
@@ -572,6 +572,67 @@ class MovieAndShowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableSeatCount").value(1));
 
+        mockMvc.perform(post("/api/v1/bookings/{bookingId}/cancellation", bookingId)
+                        .header("Authorization", bearer(otherCustomerToken)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/v1/bookings/{bookingId}/cancellation", bookingId)
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isForbidden());
+
+        String cancellationBody = mockMvc.perform(post(
+                                "/api/v1/bookings/{bookingId}/cancellation",
+                                bookingId
+                        )
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(bookingId))
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.cancelledAt").isString())
+                .andExpect(jsonPath("$.totalPrice.amount").value(500.00))
+                .andExpect(jsonPath("$.seats.length()").value(2))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String cancelledAt = objectMapper.readTree(cancellationBody).get("cancelledAt").asText();
+
+        mockMvc.perform(post("/api/v1/bookings/{bookingId}/cancellation", bookingId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.cancelledAt").value(cancelledAt));
+
+        mockMvc.perform(get("/api/v1/bookings/{bookingId}", bookingId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.cancelledAt").value(cancelledAt))
+                .andExpect(jsonPath("$.seats.length()").value(2));
+
+        mockMvc.perform(get("/api/v1/bookings")
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].status").value("CANCELLED"))
+                .andExpect(jsonPath("$.items[0].cancelledAt").value(cancelledAt))
+                .andExpect(jsonPath("$.items[0].seatCount").value(2));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].availability").value("AVAILABLE"))
+                .andExpect(jsonPath("$.items[1].availability").value("AVAILABLE"))
+                .andExpect(jsonPath("$.items[2].availability").value("AVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableSeatCount").value(3));
+
+        mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(bookingId))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
         mockMvc.perform(get("/api/v1/bookings")
                         .header("Authorization", bearer(customerToken))
                         .param("page", "-1"))
@@ -626,6 +687,70 @@ class MovieAndShowIntegrationTest {
         assertThat(results).extracting(ConfirmationHttpResult::bookingId).doesNotContainNull();
         assertThat(results.get(0).bookingId()).isEqualTo(results.get(1).bookingId());
         assertThat(bookingRepository.count()).isEqualTo(1);
+        assertThat(bookingItemRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentDuplicateCancellationsReleaseSeatsOnceAndReturnSameState() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "cancellation-race-admin@example.com",
+                "administrator-password"
+        );
+        String customerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "cancellation-race-customer@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Cancellation Race Film", 120, "en");
+        String theatreId = createTheatre(adminToken, "Cancellation Race Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        String showId = createShow(
+                adminToken,
+                theatreId,
+                auditoriumId,
+                movieId,
+                Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)
+        );
+        String holdId = createHold(customerToken, showId, showSeatIds(showId).subList(0, 2));
+        String confirmation = mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(customerToken)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String bookingId = objectMapper.readTree(confirmation).get("id").asText();
+
+        CountDownLatch start = new CountDownLatch(1);
+        List<CancellationHttpResult> results;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<CancellationHttpResult> first = executor.submit(
+                    () -> cancelBookingAfter(start, customerToken, bookingId)
+            );
+            Future<CancellationHttpResult> second = executor.submit(
+                    () -> cancelBookingAfter(start, customerToken, bookingId)
+            );
+            start.countDown();
+            results = List.of(first.get(), second.get());
+        }
+
+        assertThat(results).extracting(CancellationHttpResult::status)
+                .containsOnly(200);
+        assertThat(results).extracting(CancellationHttpResult::bookingId)
+                .containsOnly(bookingId);
+        assertThat(results).extracting(CancellationHttpResult::cancelledAt)
+                .doesNotContainNull()
+                .containsOnly(results.getFirst().cancelledAt());
+        assertThat(bookingRepository.findById(UUID.fromString(bookingId)).orElseThrow().getStatus().name())
+                .isEqualTo("CANCELLED");
+        Integer availableSeats = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM show_seat WHERE show_id = ? AND availability_status = 'AVAILABLE'",
+                Integer.class,
+                UUID.fromString(showId)
+        );
+        assertThat(availableSeats).isEqualTo(3);
         assertThat(bookingItemRepository.count()).isEqualTo(2);
     }
 
@@ -709,6 +834,24 @@ class MovieAndShowIntegrationTest {
                 .getResponse();
         String bookingId = objectMapper.readTree(response.getContentAsString()).path("id").asText(null);
         return new ConfirmationHttpResult(response.getStatus(), bookingId);
+    }
+
+    private CancellationHttpResult cancelBookingAfter(
+            CountDownLatch start,
+            String token,
+            String bookingId
+    ) throws Exception {
+        start.await();
+        var response = mockMvc.perform(post("/api/v1/bookings/{bookingId}/cancellation", bookingId)
+                        .header("Authorization", bearer(token)))
+                .andReturn()
+                .getResponse();
+        JsonNode body = objectMapper.readTree(response.getContentAsString());
+        return new CancellationHttpResult(
+                response.getStatus(),
+                body.path("id").asText(null),
+                body.path("cancelledAt").asText(null)
+        );
     }
 
     private List<String> showSeatIds(String showId) throws Exception {
@@ -869,5 +1012,8 @@ class MovieAndShowIntegrationTest {
     }
 
     private record ConfirmationHttpResult(int status, String bookingId) {
+    }
+
+    private record CancellationHttpResult(int status, String bookingId, String cancelledAt) {
     }
 }

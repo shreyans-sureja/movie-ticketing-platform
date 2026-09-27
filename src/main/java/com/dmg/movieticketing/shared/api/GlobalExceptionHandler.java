@@ -1,6 +1,7 @@
 package com.dmg.movieticketing.shared.api;
 
 import com.dmg.movieticketing.booking.application.BookingNotFoundException;
+import com.dmg.movieticketing.booking.application.BookingNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.booking.application.HoldExpiredException;
 import com.dmg.movieticketing.booking.application.HoldNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.city.application.CityNotFoundException;
@@ -427,6 +428,20 @@ public class GlobalExceptionHandler {
                 exception.getMessage(),
                 request,
                 "BOOKING_NOT_FOUND"
+        );
+    }
+
+    @ExceptionHandler(BookingNoLongerOwnsSeatsException.class)
+    ResponseEntity<ApiProblem> handleBookingNoLongerOwnsSeats(
+            BookingNoLongerOwnsSeatsException exception,
+            HttpServletRequest request
+    ) {
+        return conflict(
+                "booking-no-longer-owns-seats",
+                "Booking no longer owns seats",
+                exception.getMessage(),
+                request,
+                "BOOKING_NO_LONGER_OWNS_SEATS"
         );
     }
 

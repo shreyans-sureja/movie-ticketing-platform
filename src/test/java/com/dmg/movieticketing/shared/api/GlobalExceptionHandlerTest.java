@@ -1,6 +1,7 @@
 package com.dmg.movieticketing.shared.api;
 
 import com.dmg.movieticketing.booking.application.BookingNotFoundException;
+import com.dmg.movieticketing.booking.application.BookingNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.booking.application.HoldExpiredException;
 import com.dmg.movieticketing.booking.application.HoldNoLongerOwnsSeatsException;
 import com.dmg.movieticketing.hold.application.HoldNotFoundException;
@@ -115,6 +116,10 @@ class GlobalExceptionHandlerTest {
                 request
         );
         var missing = handler.handleBookingNotFound(new BookingNotFoundException(), request);
+        var bookingOwnership = handler.handleBookingNoLongerOwnsSeats(
+                new BookingNoLongerOwnsSeatsException(),
+                request
+        );
 
         assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(expired.getBody()).isNotNull();
@@ -125,5 +130,8 @@ class GlobalExceptionHandlerTest {
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(missing.getBody()).isNotNull();
         assertThat(missing.getBody().code()).isEqualTo("BOOKING_NOT_FOUND");
+        assertThat(bookingOwnership.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(bookingOwnership.getBody()).isNotNull();
+        assertThat(bookingOwnership.getBody().code()).isEqualTo("BOOKING_NO_LONGER_OWNS_SEATS");
     }
 }
