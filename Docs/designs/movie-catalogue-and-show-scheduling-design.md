@@ -1,9 +1,12 @@
-# Movie Catalogue and Show Scheduling Design Proposal
+# Movie Catalogue and Show Scheduling Design
 
-**Status:** Implemented  
-**Last updated:** 2026-09-25  
+**Status:** Implemented
+
+**Last updated:** 2026-09-27
+
 **Depends on:** [Identity and Authentication Design](identity-authentication-design.md) and [Theatre Administration Design](theatre-admin-management-design.md)
-**Related implementation:** [Customer Seat Hold Design](customer-seat-hold-design.md)
+
+**Related implementations:** [Customer Seat Hold Design](customer-seat-hold-design.md), [Booking Confirmation Design](booking-confirmation-design.md), and [Booking Cancellation Design](booking-cancellation-design.md)
 
 ## 1. Purpose
 
@@ -14,7 +17,7 @@ The design keeps two concerns separate:
 - A global movie catalogue that theatre administrators can extend and everyone can read.
 - Shows that a theatre administrator may schedule only inside a theatre they own.
 
-Every show receives immutable, show-specific seat inventory copied from its auditorium's physical seats. The implemented customer hold flow targets that show inventory, and future bookings must do the same; neither operates on the physical layout.
+Every show receives immutable, show-specific seat inventory copied from its auditorium's physical seats. The implemented hold, confirmation, and cancellation flows target that show inventory; none operates on the physical layout.
 
 ## 2. Confirmed Requirements
 
@@ -30,12 +33,12 @@ Every show receives immutable, show-specific seat inventory copied from its audi
 - Each show seat retains the physical seat reference internally and snapshots row label, seat number, tier, price, and currency.
 - `seatLabel` is never persisted; public responses derive it from the snapshotted row label and seat number.
 - Public APIs expose `showSeatId`, not `physicalSeatId`.
-- Holds and bookings will operate on show seats, not physical seats.
+- Holds and bookings operate on show seats, not physical seats.
 - Public APIs support movie search, movie detail, show search by city/movie/date, show detail, and show-seat availability.
 - Timestamps are stored in UTC and application time comes from an injected UTC `Clock`.
 - Show creation accepts only future start times, and show search returns only upcoming shows.
 - Concurrent scheduling in one auditorium is serialized by locking that auditorium's database row inside the transaction.
-- Hold, booking, payment, cancellation, and refund behavior is not designed in this phase.
+- Hold, booking, cancellation, payment, and refund behavior is outside this document. Holds, confirmation, and cancellation are specified in their linked designs; payments and refunds remain unimplemented.
 
 ## 3. Terminology
 
@@ -141,7 +144,7 @@ Physical-seat data is the layout template only. Existing show seats never re-rea
 
 ### 5.6 Show-seat identity is the sales boundary
 
-Every hold or future booking must reference `show_seat.id`. It must not reference `physical_seat.id` as the item being held or sold. Public APIs therefore expose `showSeatId` and do not expose the internal physical-seat reference.
+Every hold and booking item references `show_seat.id`. Neither references `physical_seat.id` as the item being held or sold. Public APIs therefore expose `showSeatId` and do not expose the internal physical-seat reference.
 
 The physical seat ID remains on the snapshot for traceability and uniqueness within a show. It does not carry availability or booking state across shows.
 
@@ -189,11 +192,11 @@ Requests for the same auditorium serialize. Requests for different auditoriums l
 
 If the platform expands beyond India, theatre-specific IANA time zones must be designed before scheduling those theatres.
 
-### 5.10 Availability in this phase
+### 5.10 Availability and later state transitions
 
-Every generated show seat starts as `AVAILABLE`. The later customer-hold implementation may store `HELD` and a current hold pointer. Public seat reads and show-search counts now return effective availability by combining the stored status with the current hold's expiry.
+Every generated show seat starts as `AVAILABLE`. The customer-hold implementation may store `HELD` and a current hold pointer. Confirmation may transition it to `BOOKED`; cancellation may return it to `AVAILABLE`. Public seat reads and show-search counts return effective availability by combining stored state with the current hold's expiry.
 
-The separate [customer seat hold design](customer-seat-hold-design.md) defines the implemented hold states, expiry, PostgreSQL seat-row locking, and expiry-aware reads. Booking behavior remains undesigned.
+The separate [customer seat hold](customer-seat-hold-design.md), [booking confirmation](booking-confirmation-design.md), and [booking cancellation](booking-cancellation-design.md) documents define those transitions and their PostgreSQL locking protocols.
 
 ## 6. High-Level Design
 
@@ -355,7 +358,7 @@ Currency is stored on `movie_show`, each tier price, and each `show_seat`. The d
 
 | Column | Type | Rules |
 |---|---|---|
-| `id` | `UUID` | Primary key and future hold/booking target. |
+| `id` | `UUID` | Primary key and hold/booking target. |
 | `show_id` | `UUID` | Required FK to `movie_show(id)`. |
 | `physical_seat_id` | `UUID` | Required FK to `physical_seat(id)`; traceability only after snapshot. |
 | `row_label` | `VARCHAR(10)` | Required snapshot. |
@@ -363,8 +366,9 @@ Currency is stored on `movie_show`, each tier price, and each `show_seat`. The d
 | `tier` | `VARCHAR(20)` | Required snapshot. |
 | `price` | `NUMERIC(12,2)` | Required final price snapshot, greater than zero; mapped to Java `BigDecimal`. |
 | `currency` | `VARCHAR(3)` | Required currency snapshot. |
-| `availability_status` | `VARCHAR(20)` | Required; only `AVAILABLE` is created in this phase. |
+| `availability_status` | `VARCHAR(20)` | Required; show creation writes `AVAILABLE`, while later flows may write `HELD` or `BOOKED`. |
 | `current_hold_id` | `UUID` | Nullable FK added by the hold migration; identifies the current hold when stored status is `HELD`. |
+| `current_booking_id` | `UUID` | Nullable FK added by the booking migration; identifies the current booking when stored status is `BOOKED`. |
 | `created_at` | `TIMESTAMPTZ` | Required, UTC. |
 
 Required uniqueness:
@@ -372,7 +376,7 @@ Required uniqueness:
 - `(show_id, physical_seat_id)`
 - `(show_id, row_label, seat_number)`
 
-There is no persisted `seat_label`; it is generated in responses. The later hold migration adds only the current hold pointer to this table; expiry and customer identity remain on `seat_hold`. No booking ID is present.
+There is no persisted `seat_label`; it is generated in responses. Migration `V5` adds `current_hold_id`, while `V6` adds `current_booking_id` and a composite foreign key to the matching `booking_item`. Expiry and customer identity remain outside `show_seat`.
 
 ## 8. High-Level API Summary
 
@@ -608,7 +612,7 @@ Response — `200 OK`:
 }
 ```
 
-The API exposes `showSeatId` as the only seat identity accepted by the hold API or any future booking API. The internal physical-seat reference is not exposed by any public API. `seatLabel` is generated from the snapshotted `rowLabel` and `seatNumber`; it is not persisted. Hold endpoints are defined in the related hold document; no booking endpoint exists.
+The API exposes `showSeatId` as the seat identity used by hold and booking contracts. The internal physical-seat reference is not exposed by any public API. `seatLabel` is generated from the snapshotted `rowLabel` and `seatNumber`; it is not persisted. Hold and booking endpoints are defined in their related design documents.
 
 ## 12. Validation Rules
 
@@ -694,10 +698,10 @@ flowchart LR
     B --> E[Movie show]
     B --> F[Show tier prices]
     B --> G[One show seat per physical seat]
-    G --> H[Customer holds and future bookings]
+    G --> H[Customer holds and bookings]
 ```
 
-The arrow establishes the show-seat identity consumed by the separate hold implementation and future bookings; hold and booking behavior is not defined in this document.
+The arrow establishes the show-seat identity consumed by the separate hold and booking implementations; their behavior is not defined in this document.
 
 ## 15. Schedule Concurrency
 
@@ -798,7 +802,7 @@ Hibernate continues using `ddl-auto: validate`; Flyway remains the schema owner.
 - Limit title and other text lengths.
 - Use Java `BigDecimal`, PostgreSQL `NUMERIC(12,2)`, and strict currency validation; never use binary floating-point monetary types.
 - Do not expose internal physical-seat IDs through public show APIs.
-- Public show APIs return only effective show-seat availability and never expose hold, customer, or future booking identifiers.
+- Public show APIs return only effective show-seat availability and never expose hold, booking, customer, or internal physical-seat identifiers.
 
 ## 20. Test Strategy
 
@@ -897,8 +901,8 @@ The implementation follows these confirmed decisions:
 6. Back-to-back shows are allowed with no automatic cleaning buffer.
 7. Each show uses one ISO 4217 currency. API amounts are JSON decimal numbers represented by Java `BigDecimal` and persisted as `NUMERIC(12,2)`.
 8. Submitted prices exactly cover tiers present in the auditorium; unused tier prices are rejected.
-9. Show-seat status starts as `AVAILABLE`; the separate hold implementation adds `HELD` plus lazy expiry. Booking transitions remain undesigned.
+9. Show-seat status starts as `AVAILABLE`; the separate hold implementation adds `HELD` plus lazy expiry, while booking confirmation and cancellation define `BOOKED` and release transitions.
 10. Movie/show update, cancellation, and deletion APIs remain outside this phase.
 11. An auditorium database-row lock plus an overlap query is the only show-scheduling concurrency protocol; no JVM-local or PostgreSQL-specific locking feature is added.
 
-Customer seat holding is implemented as the separate capability linked above. Booking remains a later, separate design phase.
+Customer seat holding, booking confirmation, and booking cancellation are implemented as the separate capabilities linked above.

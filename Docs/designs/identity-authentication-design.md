@@ -53,7 +53,7 @@ The following are out of scope for this iteration:
 - Device/session management.
 - Fine-grained permissions beyond `CUSTOMER` and `THEATRE_ADMIN`.
 - Separate customer, theatre-admin, or local-credential tables.
-- Mapping theatre administrators to specific theaters or defining their business permissions. That belongs to the later theater-management design.
+- Mapping theatre administrators to owned theatres or defining their business permissions inside the identity capability. Ownership is implemented separately by the [theatre administration design](theatre-admin-management-design.md).
 - Machine-to-machine identities.
 - A user-profile model beyond the identity data required for authentication.
 - Rate-limiting infrastructure. Authentication endpoints should remain compatible with adding it later.
@@ -91,7 +91,7 @@ The identity capability owns:
 - JWT issuance and verification.
 - Conversion of an authenticated identity into an application principal.
 
-The identity capability does not own customer booking history, theater administration data, theater-to-admin assignments, payments, or other business entities. Other capabilities should reference the authenticated account by immutable account ID. A `THEATRE_ADMIN` role identifies the account type; it does not grant ownership of every theater by itself.
+The identity capability does not own customer booking history, theatre administration data, theatre-to-admin assignments, payments, or other business entities. Other capabilities should reference the authenticated account by immutable account ID. A `THEATRE_ADMIN` role identifies the account type; it does not grant ownership of every theatre by itself.
 
 ## 7. High-level design
 
@@ -214,7 +214,7 @@ This is a public signup endpoint for theatre administrators. The role is fixed b
 5. Return public account metadata with `201 Created`.
 6. The theatre administrator signs in through the shared sign-in endpoint.
 
-The identity flow does not decide which theater the administrator manages. That relationship and its authorization rules are intentionally deferred to the theater-management design.
+The identity flow does not decide which theatre the administrator manages. That relationship and its authorization rules belong to the separate [theatre administration design](theatre-admin-management-design.md).
 
 ```mermaid
 sequenceDiagram
@@ -422,7 +422,7 @@ Implemented constraints and indexes:
 
 The first version will not create separate `customer_account`, `theatre_admin_account`, or `local_credential` tables. Both roles and the password hash live in `user_account`. A separate authentication-identity table may be considered later if a second authentication mechanism creates a concrete need for it.
 
-The relationship between a theatre administrator and the theater or theaters they manage is also outside this identity schema and will be designed with the theater-management capability.
+The relationship between a theatre administrator and the theatres they manage is outside this identity schema and is implemented by the separate [theatre administration capability](theatre-admin-management-design.md).
 
 ### 10.3 Entity diagram
 
@@ -509,7 +509,7 @@ Errors:
 - `400 Bad Request` for malformed input or password-policy violations.
 - `409 Conflict` when an account already exists for the normalized email.
 
-The endpoint—not a client-submitted field—assigns the `THEATRE_ADMIN` role. This role denotes a theater administrator rather than a platform-wide system administrator. Theater assignment and resource-level permissions are outside this identity API.
+The endpoint—not a client-submitted field—assigns the `THEATRE_ADMIN` role. This role denotes a theatre administrator rather than a platform-wide system administrator. Theatre ownership and resource-level permissions are outside this identity API.
 
 ### 11.3 Sign-in
 
@@ -606,9 +606,9 @@ The initial model has two roles:
 | Role | Identity capabilities | Business capability summary |
 |---|---|---|
 | `CUSTOMER` | Sign in and read own identity | Browse, book/cancel own seats, view own history |
-| `THEATRE_ADMIN` | Public signup, sign in, and read own identity | Manage only the theater resources permitted by the later theater-management design |
+| `THEATRE_ADMIN` | Public signup, sign in, and read own identity | Manage only the owned theatre resources permitted by the [theatre administration design](theatre-admin-management-design.md) |
 
-Identity establishes who the caller is and their role. Each business capability remains responsible for resource-level authorization, such as ensuring a customer can view only their own booking or a theatre administrator can manage only an assigned theater.
+Identity establishes who the caller is and their role. Each business capability remains responsible for resource-level authorization, such as ensuring a customer can view only their own booking or a theatre administrator can manage only an owned theatre.
 
 ## 13. Security considerations
 

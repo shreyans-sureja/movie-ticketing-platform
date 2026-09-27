@@ -58,7 +58,7 @@ class SeatHoldServiceTest {
                 showSeatRepository,
                 seatHoldRepository,
                 seatHoldItemRepository,
-                new HoldProperties(Duration.ofMinutes(5)),
+                new HoldProperties(Duration.ofSeconds(5)),
                 CLOCK,
                 holdConversionLookup
         );
@@ -99,7 +99,7 @@ class SeatHoldServiceTest {
         assertThat(result.status()).isEqualTo(HoldStatus.ACTIVE);
         assertThat(result.hold().getCustomerAccountId()).isEqualTo(customerId);
         assertThat(result.hold().getCreatedAt()).isEqualTo(NOW);
-        assertThat(result.hold().getExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
+        assertThat(result.hold().getExpiresAt()).isEqualTo(NOW.plusSeconds(5));
         assertThat(result.seats()).containsExactly(firstSeat, secondSeat);
         verify(firstSeat).assignHold(result.hold().getId());
         verify(secondSeat).assignHold(result.hold().getId());

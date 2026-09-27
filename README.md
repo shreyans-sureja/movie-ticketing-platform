@@ -1,6 +1,6 @@
 # Movie Ticketing Platform
 
-A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
+A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theatres, shows, and seat-level booking.
 
 The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, customer booking history, whole-booking cancellation, and local booking lifecycle notifications are implemented. Payments, refunds, and external notification delivery remain future work.
 
@@ -85,6 +85,21 @@ Cancellation preserves the booking, items, original prices, confirmation timesta
 - Spring Security and OAuth2 Resource Server JWT support
 - JUnit 5, AssertJ, MockMvc, and Testcontainers
 
+## Key assumptions and design trade-offs
+
+- The assignment's `admin` role is interpreted as a theatre administrator, not a platform-wide administrator. Signup is open, and ownership checks restrict each administrator to their own theatre hierarchy.
+- Cities are a fixed, public catalogue of 50 Flyway-seeded Indian cities. City management APIs are intentionally omitted.
+- Movies are global and immediately visible. The intentionally small duplicate key is normalized title, language code, and runtime.
+- Physical seats are reusable layout definitions. Prices and sellable availability belong to immutable show-seat snapshots created when a show is scheduled.
+- `REGULAR` and `PREMIUM` are layout tiers. Weekend pricing is not a tier or rule engine; an administrator submits final tier prices independently for every show.
+- Expired holds release seats logically through expiry-aware queries. Correctness does not depend on a scheduler deleting or updating expired holds.
+- Direct confirmation creates a booking without payment. Cancellation releases the complete booking before show start but performs no refund.
+- Confirmation and cancellation notifications are after-commit and best effort. The local logging adapter proves the pluggable boundary but does not provide durable external delivery or reminders.
+- PostgreSQL transactions, row locks, constraints, and stable lock ordering are the concurrency authority. No JVM-local lock participates in correctness.
+- All timestamps are stored in UTC. `Asia/Kolkata` is used only to translate a customer's show-search date into UTC bounds.
+
+See the [project HLD and LLD](Docs/designs/project-architecture-hld-lld.md) for the complete current-state architecture, transaction boundaries, package dependencies, schema invariants, and extension points.
+
 ## Project structure
 
 ```text
@@ -129,6 +144,18 @@ src/main/java/com/dmg/movieticketing/
 src/main/resources/
 |- application.yml
 `- db/migration/       Flyway migrations
+
+Docs/
+|- designs/            Feature designs and the project HLD/LLD
+|- collection/         Import-ready Postman collection
+|- AGENTS.md            Repository development instructions
+|- Prompts.md           Chronological development prompt log
+`- skills_used.md       Skills record required by the assignment
+
+scripts/
+`- api-demo.py          Self-checking end-to-end API demonstration
+
+mvnw, mvnw.cmd          Pinned Maven Wrapper entry points
 ```
 
 ## Local setup
@@ -196,6 +223,41 @@ Run the complete build lifecycle with:
 ```bash
 ./mvnw verify
 ```
+
+## Running the API behavior demo
+
+Run the application with a five-second hold duration so the expiry scenario completes quickly:
+
+```bash
+BOOKING_HOLD_DURATION=PT5S ./mvnw spring-boot:run
+```
+
+With the application and PostgreSQL running, execute the complete API demonstration with one command:
+
+```bash
+./scripts/api-demo.py
+```
+
+The script uses only Python 3.10+ standard-library modules. It creates uniquely named demo accounts and resources, checks every response, and exits non-zero when an invariant fails. Override the target when the application is not using the default address:
+
+```bash
+BASE_URL=http://localhost:8081 ./scripts/api-demo.py
+```
+
+The demonstration covers:
+
+- public catalogue and show discovery access;
+- customer and theatre-admin signup, shared sign-in, role restrictions, and owner-scoped theatre data;
+- required pricing for every physical-seat tier;
+- concurrent overlapping show creation with one winner per auditorium;
+- concurrent overlapping holds with one winner and all-or-nothing seat acquisition;
+- concurrent confirmation, serial confirmation retry, stable booking identity, and one history entry;
+- customer ownership hiding for holds and bookings;
+- concurrent and repeated cancellation with a stable cancellation timestamp;
+- immediate seat availability and reacquisition after cancellation; and
+- five-second hold expiry, lazy seat availability, seat reacquisition, and rejected confirmation of the expired hold.
+
+The current API has no deletion endpoints, so successful demo records remain in the configured database. Every run uses unique names and emails and can safely coexist with earlier runs.
 
 ## Identity API
 
@@ -284,7 +346,7 @@ Errors use `application/problem+json`:
 
 Important identity error codes include `EMAIL_ALREADY_REGISTERED`, `INVALID_CREDENTIALS`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, and `FORBIDDEN`.
 
-Malformed JSON returns `400 MALFORMED_REQUEST`. Bean-validation failures, missing required query parameters, and incorrectly typed query parameters return `400 VALIDATION_FAILED` with field-level entries in `violations`. These errors use the same problem response envelope across identity, theatre, movie, and show APIs.
+Malformed JSON returns `400 MALFORMED_REQUEST`. Bean-validation failures, missing required query parameters, and incorrectly typed query parameters return `400 VALIDATION_FAILED` with field-level entries in `violations`. These errors use the same problem response envelope across all APIs.
 
 ## City API
 
@@ -494,6 +556,7 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 
 ## Documentation
 
+- [Project HLD and LLD](Docs/designs/project-architecture-hld-lld.md)
 - [Agent instructions](Docs/AGENTS.md)
 - [Development prompts](Docs/Prompts.md)
 - [Skills used](Docs/skills_used.md)
