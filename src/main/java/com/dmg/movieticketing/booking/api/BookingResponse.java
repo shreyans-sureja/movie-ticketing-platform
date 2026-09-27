@@ -14,6 +14,7 @@ public record BookingResponse(
         UUID showId,
         BookingStatus status,
         Instant confirmedAt,
+        Instant cancelledAt,
         MoneyResponse totalPrice,
         List<BookingSeatResponse> seats
 ) {
@@ -26,6 +27,7 @@ public record BookingResponse(
                 booking.getShowId(),
                 booking.getStatus(),
                 booking.getConfirmedAt(),
+                booking.getCancelledAt(),
                 new MoneyResponse(booking.getTotalAmount(), booking.getCurrency()),
                 details.items().stream()
                         .map(item -> BookingSeatResponse.from(item, booking.getCurrency()))

@@ -4,8 +4,11 @@ import com.dmg.movieticketing.booking.application.BookingHistoryItem;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +19,18 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     Optional<Booking> findByIdAndCustomerAccountId(UUID id, UUID customerAccountId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT booking
+            FROM Booking booking
+            WHERE booking.id = :id
+              AND booking.customerAccountId = :customerAccountId
+            """)
+    Optional<Booking> findOwnedForUpdate(
+            @Param("id") UUID id,
+            @Param("customerAccountId") UUID customerAccountId
+    );
+
     boolean existsBySourceHoldId(UUID sourceHoldId);
 
     @Query(
@@ -25,6 +40,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
                 booking.showId,
                 booking.status,
                 booking.confirmedAt,
+                booking.cancelledAt,
                 booking.totalAmount,
                 booking.currency,
                 COUNT(item)
@@ -37,6 +53,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
                 booking.showId,
                 booking.status,
                 booking.confirmedAt,
+                booking.cancelledAt,
                 booking.totalAmount,
                 booking.currency
             ORDER BY booking.confirmedAt DESC, booking.id DESC

@@ -11,6 +11,7 @@ public record BookingHistoryItem(
         UUID showId,
         BookingStatus status,
         Instant confirmedAt,
+        Instant cancelledAt,
         BigDecimal totalAmount,
         String currency,
         Long seatCount

@@ -52,6 +52,14 @@ public class BookingController {
         return BookingResponse.from(bookingService.getOwnedBooking(principal.accountId(), bookingId));
     }
 
+    @PostMapping("/api/v1/bookings/{bookingId}/cancellation")
+    public BookingResponse cancel(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID bookingId
+    ) {
+        return BookingResponse.from(bookingService.cancel(principal.accountId(), bookingId));
+    }
+
     @GetMapping("/api/v1/bookings")
     public BookingListResponse listHistory(
             @AuthenticationPrincipal AccountPrincipal principal,

@@ -12,7 +12,7 @@ This document describes the implemented direct hold-to-booking confirmation phas
 - No payment is required in this phase; a successful transaction confirms the booking directly.
 - The design must remain correct when confirmation, duplicate confirmation, hold expiry, and seat reacquisition happen concurrently.
 - PostgreSQL transactions and row locks remain the concurrency authority; no JVM-local lock is used.
-- Cancellation, payment, refund, and notification flows are out of scope.
+- Cancellation is covered separately by the implemented [booking cancellation design](booking-cancellation-design.md). Payment, refund, and notification flows remain out of scope.
 - `show_seat.current_booking_id` and the composite foreign key to `booking_item` are retained.
 - Persistence order is booking first, then flushed booking items, then show-seat updates.
 - Only indexes required by the designed API query paths are added.
@@ -22,8 +22,8 @@ This document describes the implemented direct hold-to-booking confirmation phas
 ### 2.1 In scope
 
 - Confirm one active, customer-owned hold as one booking.
-- Read a confirmed booking owned by the authenticated customer.
-- List the authenticated customer's confirmed bookings with pagination.
+- Read a booking owned by the authenticated customer; the separate cancellation flow may have changed it to `CANCELLED`.
+- List the authenticated customer's bookings with pagination.
 - Persist the booking, its complete seat set, final prices, currency, and confirmation timestamp.
 - Move every show seat in the hold from `HELD` to `BOOKED` atomically.
 - Make confirmation safe to retry after a lost HTTP response.
@@ -32,7 +32,7 @@ This document describes the implemented direct hold-to-booking confirmation phas
 ### 2.2 Out of scope
 
 - Payment initiation, payment authorization, callbacks, or reconciliation.
-- Booking cancellation or seat release after confirmation.
+- Booking cancellation or seat release within the confirmation transaction itself; the separate cancellation flow handles the later state transition.
 - Refunds or refund policies.
 - Email, SMS, push, or other notifications.
 - Booking modification, seat replacement, or adding seats to an existing booking.
@@ -77,7 +77,7 @@ stateDiagram-v2
 
 The `HELD -> AVAILABLE` arrow is an effective read state, not a stored update. The database row may remain `HELD` with an expired `current_hold_id` until another transaction acquires it.
 
-For this phase, `BOOKED` is terminal. Cancellation and any future `BOOKED -> AVAILABLE` transition require a separate design.
+For the confirmation transaction, `BOOKED` is its terminal state. The implemented [booking cancellation design](booking-cancellation-design.md) defines the separate atomic `BOOKED -> AVAILABLE` transition without changing confirmation's invariants.
 
 ### 4.2 Hold state
 
@@ -91,7 +91,7 @@ Hold status remains derived rather than persisted:
 
 ### 4.3 Booking state
 
-A booking is created directly as `CONFIRMED`. No pending or payment-related state is introduced. The status is persisted to make the aggregate explicit, but `CONFIRMED` is its only allowed value in this phase.
+A booking is created directly as `CONFIRMED`. No pending or payment-related state is introduced. The separate cancellation flow can later change it to `CANCELLED` and records `cancelled_at`.
 
 ## 5. Data Model
 
@@ -113,6 +113,7 @@ erDiagram
         numeric total_amount
         varchar currency
         timestamptz confirmed_at
+        timestamptz cancelled_at nullable
     }
     BOOKING_ITEM {
         uuid booking_id PK, FK
@@ -135,10 +136,11 @@ erDiagram
 | `source_hold_id` | `UUID` | Required FK to `seat_hold(id)` and unique. One hold can produce at most one booking. |
 | `show_id` | `UUID` | Required FK to `movie_show(id)`; copied from the hold for direct ownership and query access. |
 | `customer_account_id` | `UUID` | Required FK to `user_account(id)`; taken from the authenticated hold owner. |
-| `status` | `VARCHAR(20)` | Required; check constrained to `CONFIRMED` in this phase. |
+| `status` | `VARCHAR(20)` | Required; confirmation creates `CONFIRMED`, and the separate cancellation flow may later change it to `CANCELLED`. |
 | `total_amount` | `NUMERIC(12,2)` | Required, non-negative sum of all item prices. Java type is `BigDecimal`. |
 | `currency` | `VARCHAR(3)` | Required ISO 4217 currency shared by all booked seats. |
 | `confirmed_at` | `TIMESTAMPTZ` | Required UTC instant captured from the injected clock after locks are acquired. |
+| `cancelled_at` | `TIMESTAMPTZ` | Nullable UTC instant managed only by the separate cancellation flow. |
 
 Storing `source_hold_id` as unique is both a domain constraint and the database backstop for retry safety.
 
@@ -152,7 +154,7 @@ Storing `source_hold_id` as unique is both a domain constraint and the database 
 
 Currency is stored once on the booking because one show already has one currency and confirmation validates that every show seat uses it. Seat row, number, tier, and physical-seat data are not duplicated into `booking_item`; the referenced `show_seat` is already their immutable show-specific snapshot. `seatLabel` remains derived as `rowLabel + seatNumber` and is never persisted.
 
-There is no global unique constraint on `booking_item.show_seat_id`. The current owner is represented by `show_seat.current_booking_id`, following the existing current-hold-pointer model and allowing a future cancellation design to preserve historical items. The confirmation transaction and row locks maintain the one-current-booking invariant.
+There is no global unique constraint on `booking_item.show_seat_id`. The current owner is represented by `show_seat.current_booking_id`, following the existing current-hold-pointer model and allowing cancellation to preserve historical items. The confirmation transaction and row locks maintain the one-current-booking invariant.
 
 ### 5.3 `show_seat` changes
 
@@ -215,6 +217,7 @@ Location: /api/v1/bookings/6e20cc2c-740d-4fd0-85c8-c634c14db44d
   "showId": "6e6e5731-8c4b-4bcb-a0cf-f36a45233b6c",
   "status": "CONFIRMED",
   "confirmedAt": "2026-09-25T12:03:00Z",
+  "cancelledAt": null,
   "totalPrice": {
     "amount": 500.00,
     "currency": "INR"
@@ -266,7 +269,7 @@ Access: authenticated `CUSTOMER` only.
 - `size` defaults to `20` and must be between `1` and `100`.
 - Ordering is fixed to `confirmedAt DESC, id DESC` so pagination is deterministic. Client-selected sorting is not supported in this phase.
 - The repository query always includes `customer_account_id = authenticatedAccountId`; there is no customer-ID request parameter.
-- The result includes all of the customer's confirmed bookings, including bookings for shows that have already ended.
+- The result includes all of the customer's `CONFIRMED` and `CANCELLED` bookings, including bookings for shows that have already ended.
 
 Success: `200 OK`
 
@@ -278,6 +281,7 @@ Success: `200 OK`
       "showId": "6e6e5731-8c4b-4bcb-a0cf-f36a45233b6c",
       "status": "CONFIRMED",
       "confirmedAt": "2026-09-25T12:03:00Z",
+      "cancelledAt": null,
       "totalPrice": {
         "amount": 500.00,
         "currency": "INR"

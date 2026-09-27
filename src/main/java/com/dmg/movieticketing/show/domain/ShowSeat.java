@@ -159,6 +159,12 @@ public class ShowSeat {
         this.currentBookingId = bookingId;
     }
 
+    public void releaseBooking() {
+        this.availabilityStatus = ShowSeatAvailability.AVAILABLE;
+        this.currentHoldId = null;
+        this.currentBookingId = null;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

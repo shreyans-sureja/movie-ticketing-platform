@@ -12,6 +12,7 @@ public record BookingSummaryResponse(
         UUID showId,
         BookingStatus status,
         Instant confirmedAt,
+        Instant cancelledAt,
         MoneyResponse totalPrice,
         long seatCount
 ) {
@@ -22,6 +23,7 @@ public record BookingSummaryResponse(
                 item.showId(),
                 item.status(),
                 item.confirmedAt(),
+                item.cancelledAt(),
                 new MoneyResponse(item.totalAmount(), item.currency()),
                 item.seatCount()
         );

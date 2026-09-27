@@ -1188,7 +1188,7 @@
     },
     {
       "name": "Customer Bookings",
-      "description": "Implemented CUSTOMER-only hold confirmation, owned booking detail, and owner-scoped booking-history APIs.",
+      "description": "Implemented CUSTOMER-only hold confirmation, whole-booking cancellation, owned booking detail, and owner-scoped booking-history APIs.",
       "auth": {
         "type": "bearer",
         "bearer": [
@@ -1251,7 +1251,7 @@
                 "{{bookingId}}"
               ]
             },
-            "description": "Returns a confirmed booking only when it belongs to the authenticated customer."
+            "description": "Returns a confirmed or cancelled booking only when it belongs to the authenticated customer."
           },
           "response": []
         },
@@ -1281,7 +1281,41 @@
                 }
               ]
             },
-            "description": "Returns only the authenticated customer's bookings, newest first, with set-based seat counts."
+            "description": "Returns only the authenticated customer's confirmed and cancelled bookings, newest first, with set-based seat counts."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Owned Booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Complete booking cancelled or replayed', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Booking is cancelled', function () { pm.expect(pm.response.json().status).to.eql('CANCELLED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{bookingId}}/cancellation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}",
+                "cancellation"
+              ]
+            },
+            "description": "Atomically cancels the authenticated customer's complete booking before show start. A retry returns the same CANCELLED booking."
           },
           "response": []
         }
@@ -1302,8 +1336,8 @@
           "item": []
         },
         {
-          "name": "Cancellations and Refunds",
-          "description": "Placeholder only; no API contract is defined.",
+          "name": "Refunds",
+          "description": "Placeholder only; no refund API contract is defined.",
           "item": []
         },
         {

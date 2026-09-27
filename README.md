@@ -2,7 +2,7 @@
 
 A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
 
-The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, and customer booking history are implemented. Payments, refunds, and notifications remain future work.
+The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, customer booking history, and whole-booking cancellation are implemented. Payments, refunds, and notifications remain future work.
 
 ## Implemented scope
 
@@ -42,6 +42,8 @@ The current implementation provides:
 - Retry-safe booking confirmation with one booking per hold.
 - `BOOKED` show-seat state with database-enforced booking-item ownership.
 - Customer-owned booking detail and paginated booking history.
+- Atomic, owner-scoped whole-booking cancellation before show start.
+- Idempotent duplicate cancellation with transactional release of every booked show seat.
 - UTC timestamp storage and an injected UTC `Clock` for application time.
 
 Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Holds and bookings operate on show-specific seat inventory rather than the physical-seat layout.
@@ -62,7 +64,13 @@ An authenticated customer can convert their own active hold into one `CONFIRMED`
 
 Confirmation is naturally retry-safe. `booking.source_hold_id` is unique, so the first request creates the booking with `201 Created` and a later retry returns the same booking with `200 OK`. A lost HTTP response therefore cannot create a duplicate booking. Booked seats are excluded from public availability and available-seat counts.
 
-Booking detail and history are owner-scoped using the account ID from the verified JWT. History uses deterministic newest-first pagination and calculates seat counts in the page query rather than querying once per booking. Payment, cancellation, refund, and notification behavior remain out of scope. See the [booking confirmation design](Docs/designs/booking-confirmation-design.md) for the transaction and schema invariants.
+Booking detail and history are owner-scoped using the account ID from the verified JWT. History uses deterministic newest-first pagination and calculates seat counts in the page query rather than querying once per booking. See the [booking confirmation design](Docs/designs/booking-confirmation-design.md) for the confirmation transaction and schema invariants.
+
+## Booking cancellation
+
+An authenticated customer can cancel their complete booking while the post-lock UTC cancellation instant is strictly before the show start. Partial cancellation is not supported. The operation locks the owner-scoped booking row and then all of its show seats in stable UUID order. It changes the booking to `CANCELLED`, records `cancelledAt`, releases every seat to `AVAILABLE`, and commits once. Any failure rolls back the complete operation.
+
+Cancellation preserves the booking, items, original prices, confirmation timestamp, and source hold. The source hold remains `CONVERTED`, so a cancelled booking cannot be recreated from the same hold. Duplicate cancellation requests are idempotent and return the same cancelled booking with `200 OK`. Released seats immediately participate in public availability and can be held again. Refunds, payment changes, cancellation reasons, and notifications remain out of scope. See the [booking cancellation design](Docs/designs/booking-cancellation-design.md) for the lock ordering and race analysis.
 
 ## Technology
 
@@ -108,8 +116,8 @@ src/main/java/com/dmg/movieticketing/
 |  |- config/          Required hold-duration configuration
 |  `- domain/          Hold header, items, and repositories
 |- booking/
-|  |- api/             Confirmation, owned detail, and history contracts
-|  |- application/     Locking, confirmation, retry, and query use cases
+|  |- api/             Confirmation, cancellation, owned detail, and history contracts
+|  |- application/     Locking, confirmation, cancellation, retry, and query use cases
 |  `- domain/          Booking header, items, state, and repositories
 `- shared/api/         Common problem response handling
 
@@ -443,14 +451,15 @@ All booking endpoints require `Authorization: Bearer <access-token>` for an acco
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/holds/{holdId}/booking` | Atomically confirm the authenticated customer's active hold. |
-| `GET` | `/api/v1/bookings/{bookingId}` | Read a confirmed booking owned by the authenticated customer. |
+| `GET` | `/api/v1/bookings/{bookingId}` | Read a confirmed or cancelled booking owned by the authenticated customer. |
 | `GET` | `/api/v1/bookings?page=0&size=20` | List only the authenticated customer's bookings, newest first. |
+| `POST` | `/api/v1/bookings/{bookingId}/cancellation` | Atomically cancel the authenticated customer's complete booking before show start. |
 
 Confirmation takes no request body. A successful response contains the booking ID, source hold, show, confirmation time, total price, and complete seat set. The first confirmation returns `201`; an exact retry returns the same representation with `200`.
 
-History defaults to page `0` and size `20`, with a maximum size of `100`. Its compact entries contain the booking ID, show ID, status, confirmation time, total price, and seat count. Use the detail endpoint for individual seat information.
+History defaults to page `0` and size `20`, with a maximum size of `100`. Its compact entries contain the booking ID, show ID, status, confirmation time, nullable cancellation time, total price, and seat count. Use the detail endpoint for individual seat information. Booking detail also includes nullable `cancelledAt`.
 
-Important booking error codes are `BOOKING_NOT_FOUND`, `HOLD_EXPIRED`, `HOLD_NO_LONGER_OWNS_SEATS`, and `SHOW_ALREADY_STARTED`. Missing and cross-customer resources use the same not-found response.
+Cancellation takes no request body and always covers the complete booking. Its first success and exact retries return `200`. Important booking error codes are `BOOKING_NOT_FOUND`, `BOOKING_NO_LONGER_OWNS_SEATS`, `HOLD_EXPIRED`, `HOLD_NO_LONGER_OWNS_SEATS`, and `SHOW_ALREADY_STARTED`. Missing and cross-customer resources use the same not-found response.
 
 ## Confirmed identity decisions
 
@@ -470,7 +479,7 @@ Important booking error codes are `BOOKING_NOT_FOUND`, `HOLD_EXPIRED`, `HOLD_NO_
 - Accessibility attributes and visual seat-map editing.
 - Dynamic show-pricing rules and discount codes.
 - Payments.
-- Cancellation and configurable refunds.
+- Partial booking cancellation and refunds.
 - Non-blocking confirmation and reminder notifications.
 
 The assignment continues to exclude a frontend, deployment/containerization, CI/CD, microservices, advanced authentication, and production-grade monitoring.
@@ -485,4 +494,5 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 - [Movie catalogue and show scheduling design](Docs/designs/movie-catalogue-and-show-scheduling-design.md)
 - [Customer seat hold design](Docs/designs/customer-seat-hold-design.md)
 - [Booking confirmation design](Docs/designs/booking-confirmation-design.md)
+- [Booking cancellation design](Docs/designs/booking-cancellation-design.md)
 - [Postman API collection](Docs/collection/movie-ticketing-platform.postman_collection.json)

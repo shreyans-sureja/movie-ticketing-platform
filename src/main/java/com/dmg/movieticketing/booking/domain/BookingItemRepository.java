@@ -10,6 +10,13 @@ import java.util.UUID;
 
 public interface BookingItemRepository extends JpaRepository<BookingItem, BookingItemId> {
 
+    @Query("""
+            SELECT COUNT(item)
+            FROM BookingItem item
+            WHERE item.booking.id = :bookingId
+            """)
+    long countForBooking(@Param("bookingId") UUID bookingId);
+
     @EntityGraph(attributePaths = "showSeat")
     @Query("""
             SELECT item

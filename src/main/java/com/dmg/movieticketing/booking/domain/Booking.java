@@ -40,6 +40,9 @@ public class Booking {
     @Column(name = "confirmed_at", nullable = false)
     private Instant confirmedAt;
 
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
     protected Booking() {
     }
 
@@ -112,5 +115,20 @@ public class Booking {
 
     public Instant getConfirmedAt() {
         return confirmedAt;
+    }
+
+    public Instant getCancelledAt() {
+        return cancelledAt;
+    }
+
+    public void cancel(Instant cancelledAt) {
+        if (status != BookingStatus.CONFIRMED) {
+            throw new IllegalStateException("Only a confirmed booking can be cancelled.");
+        }
+        if (cancelledAt.isBefore(confirmedAt)) {
+            throw new IllegalArgumentException("Cancellation time cannot be before confirmation time.");
+        }
+        this.status = BookingStatus.CANCELLED;
+        this.cancelledAt = cancelledAt;
     }
 }

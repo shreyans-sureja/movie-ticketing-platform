@@ -162,3 +162,15 @@
 > create a interface in hold for checking whether a hold has been converted or now.  Make seatholdService depend on that interface instead of repository import.
 >
 > keep the lookup sync and backed by same postgres db. Do not add separate transaction, etc. Only do internal dependency cleanup. Do not change API, schema etc.
+
+## Prompt 21
+
+> Let's design booking cancellation flow. Do not implement.
+>
+> Customer should be able to cancel their own booking before the show starts. Partial cancellation is out of scope for now.
+>
+> It must be concurrency safe and atomic. Do not include refunds for now.
+
+## Prompt 22
+
+> implement the code
