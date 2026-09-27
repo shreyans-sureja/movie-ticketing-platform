@@ -15,8 +15,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -50,6 +52,8 @@ class BookingServiceTest {
     private BookingRepository bookingRepository;
     @Mock
     private BookingItemRepository bookingItemRepository;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     private BookingService service;
 
@@ -60,7 +64,8 @@ class BookingServiceTest {
                 showSeatRepository,
                 bookingRepository,
                 bookingItemRepository,
-                CLOCK
+                CLOCK,
+                eventPublisher
         );
     }
 
@@ -89,10 +94,24 @@ class BookingServiceTest {
         assertThat(result.created()).isTrue();
         assertThat(result.details().booking().getTotalAmount()).isEqualByComparingTo("650.00");
         assertThat(result.details().items()).hasSize(2);
-        InOrder writes = inOrder(bookingRepository, bookingItemRepository, showSeatRepository);
+        InOrder writes = inOrder(
+                bookingRepository,
+                bookingItemRepository,
+                showSeatRepository,
+                eventPublisher
+        );
         writes.verify(bookingRepository).save(any(Booking.class));
         writes.verify(bookingItemRepository).saveAllAndFlush(anyList());
         writes.verify(showSeatRepository).saveAllAndFlush(List.of(firstSeat, secondSeat));
+        ArgumentCaptor<BookingConfirmedEvent> event = ArgumentCaptor.forClass(BookingConfirmedEvent.class);
+        writes.verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().bookingId()).isEqualTo(result.details().booking().getId());
+        assertThat(event.getValue().customerAccountId()).isEqualTo(customerId);
+        assertThat(event.getValue().showId()).isEqualTo(showId);
+        assertThat(event.getValue().confirmedAt()).isEqualTo(NOW);
+        assertThat(event.getValue().totalAmount()).isEqualByComparingTo("650.00");
+        assertThat(event.getValue().currency()).isEqualTo("INR");
+        assertThat(event.getValue().seatCount()).isEqualTo(2);
         verify(firstSeat).confirmBooking(result.details().booking().getId());
         verify(secondSeat).confirmBooking(result.details().booking().getId());
     }
@@ -114,6 +133,7 @@ class BookingServiceTest {
         assertThat(result.created()).isFalse();
         assertThat(result.details().booking()).isSameAs(booking);
         verifyNoInteractions(showSeatRepository);
+        verifyNoInteractions(eventPublisher);
         verify(bookingRepository, never()).save(any());
     }
 
@@ -135,6 +155,7 @@ class BookingServiceTest {
 
         verify(bookingRepository, never()).save(any());
         verifyNoInteractions(bookingItemRepository);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -162,6 +183,7 @@ class BookingServiceTest {
 
         verify(bookingRepository, never()).save(any());
         verifyNoInteractions(bookingItemRepository);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -197,9 +219,19 @@ class BookingServiceTest {
         assertThat(booking.getCancelledAt()).isEqualTo(NOW);
         verify(firstSeat).releaseBooking();
         verify(secondSeat).releaseBooking();
-        InOrder writes = inOrder(bookingRepository, showSeatRepository);
+        InOrder writes = inOrder(bookingRepository, showSeatRepository, eventPublisher);
         writes.verify(bookingRepository).save(booking);
         writes.verify(showSeatRepository).saveAllAndFlush(List.of(firstSeat, secondSeat));
+        ArgumentCaptor<BookingCancelledEvent> event = ArgumentCaptor.forClass(BookingCancelledEvent.class);
+        writes.verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().bookingId()).isEqualTo(bookingId);
+        assertThat(event.getValue().customerAccountId()).isEqualTo(customerId);
+        assertThat(event.getValue().showId()).isEqualTo(showId);
+        assertThat(event.getValue().confirmedAt()).isEqualTo(NOW.minusSeconds(60));
+        assertThat(event.getValue().cancelledAt()).isEqualTo(NOW);
+        assertThat(event.getValue().totalAmount()).isEqualByComparingTo("650.00");
+        assertThat(event.getValue().currency()).isEqualTo("INR");
+        assertThat(event.getValue().seatCount()).isEqualTo(2);
     }
 
     @Test
@@ -219,6 +251,7 @@ class BookingServiceTest {
         verify(showSeatRepository, never()).findAllForCancellationUpdate(any());
         verify(bookingItemRepository, never()).countForBooking(any());
         verify(bookingRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -242,6 +275,7 @@ class BookingServiceTest {
         verify(booking, never()).cancel(any());
         verify(seat, never()).releaseBooking();
         verify(bookingRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -260,6 +294,7 @@ class BookingServiceTest {
 
         verify(booking, never()).cancel(any());
         verify(bookingRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     private ShowSeat ownedSeat(MovieShow show, UUID holdId, String price) {

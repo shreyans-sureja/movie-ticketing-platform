@@ -1341,8 +1341,8 @@
           "item": []
         },
         {
-          "name": "Notifications",
-          "description": "Placeholder only; no API contract is defined.",
+          "name": "External Notification Delivery and History",
+          "description": "Local after-commit confirmation and cancellation logging is implemented and has no HTTP API. Idempotent booking retries emit nothing. This folder is only a placeholder for undefined external delivery, history, and reminder contracts.",
           "item": []
         }
       ]

@@ -12,7 +12,7 @@ This document describes the implemented direct hold-to-booking confirmation phas
 - No payment is required in this phase; a successful transaction confirms the booking directly.
 - The design must remain correct when confirmation, duplicate confirmation, hold expiry, and seat reacquisition happen concurrently.
 - PostgreSQL transactions and row locks remain the concurrency authority; no JVM-local lock is used.
-- Cancellation is covered separately by the implemented [booking cancellation design](booking-cancellation-design.md). Payment, refund, and notification flows remain out of scope.
+- Cancellation is covered separately by the implemented [booking cancellation design](booking-cancellation-design.md). Payment and refund flows remain out of scope. Confirmation and cancellation notifications are covered by the implemented [booking lifecycle notification design](notification-flow-design.md).
 - `show_seat.current_booking_id` and the composite foreign key to `booking_item` are retained.
 - Persistence order is booking first, then flushed booking items, then show-seat updates.
 - Only indexes required by the designed API query paths are added.
@@ -34,7 +34,7 @@ This document describes the implemented direct hold-to-booking confirmation phas
 - Payment initiation, payment authorization, callbacks, or reconciliation.
 - Booking cancellation or seat release within the confirmation transaction itself; the separate cancellation flow handles the later state transition.
 - Refunds or refund policies.
-- Email, SMS, push, or other notifications.
+- Notification logic inside the confirmation transaction; the separate lifecycle-notification flow delivers only after commit and only for newly confirmed or newly cancelled bookings.
 - Booking modification, seat replacement, or adding seats to an existing booking.
 - Booking expiry or automatic cancellation.
 - Administrator booking operations.

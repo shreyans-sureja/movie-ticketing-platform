@@ -174,3 +174,20 @@
 ## Prompt 22
 
 > implement the code
+
+## Prompt 23
+
+> Let's design the notification flow.
+>
+> Customers should receive a notification when a booking is confirmed. Keep it simple for now, and adding log of those notification will work but make it dynamic so that we can plug any external service like sms, email, etc later.
+>
+> Use local adapter, and make sure that notification failure does not undo the successful booking flow. Do not implement yet, only design is required.
+
+## Prompt 24
+
+> Include notification for both booking and confirmation and cancellation. publish event only when newly confirmed or canelled, idempotent retires must not send another notification .
+
+## Prompt 25
+
+> can we update transactional listner to use AFTER_COMMIT with fallback false?
+> make this change and implement
