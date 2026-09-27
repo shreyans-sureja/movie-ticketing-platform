@@ -25,6 +25,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Coordinates customer-owned booking confirmation, cancellation, and reads.
+ * Database row locks and constraints provide the concurrency guarantees; this
+ * service deliberately does not use JVM-local synchronization.
+ */
 @Service
 public class BookingService {
 
@@ -51,11 +56,17 @@ public class BookingService {
         this.eventPublisher = eventPublisher;
     }
 
+    /**
+     * Atomically converts an active hold into a booking, or returns the booking
+     * already created from that hold when the request is retried.
+     */
     @Transactional
     public BookingConfirmationResult confirm(UUID customerAccountId, UUID holdId) {
+        // The hold is the first lock in every confirmation attempt, serializing retries for one hold.
         SeatHold hold = seatHoldRepository.findOwnedForUpdate(holdId, customerAccountId)
                 .orElseThrow(HoldNotFoundException::new);
 
+        // Check idempotency only after acquiring the hold lock so concurrent requests agree on one result.
         Booking existing = bookingRepository.findBySourceHoldId(holdId).orElse(null);
         if (existing != null) {
             return new BookingConfirmationResult(loadDetails(existing), false);
@@ -96,11 +107,13 @@ public class BookingService {
         List<BookingItem> items = seats.stream()
                 .map(seat -> BookingItem.create(booking, seat))
                 .toList();
+        // Items must exist before show_seat.current_booking_id is set because the database FK references them.
         bookingItemRepository.saveAllAndFlush(items);
 
         seats.forEach(seat -> seat.confirmBooking(booking.getId()));
         showSeatRepository.saveAllAndFlush(seats);
 
+        // Publication occurs inside the transaction; the listener intentionally runs only after commit.
         eventPublisher.publishEvent(new BookingConfirmedEvent(
                 booking.getId(),
                 booking.getCustomerAccountId(),
@@ -117,6 +130,10 @@ public class BookingService {
         );
     }
 
+    /**
+     * Cancels a complete booking before show start and releases all of its seats
+     * in the same transaction. Replaying an already completed cancellation is safe.
+     */
     @Transactional
     public BookingDetails cancel(UUID customerAccountId, UUID bookingId) {
         Booking booking = bookingRepository.findOwnedForUpdate(bookingId, customerAccountId)
@@ -128,6 +145,7 @@ public class BookingService {
 
         long itemCount = bookingItemRepository.countForBooking(bookingId);
         List<ShowSeat> seats = showSeatRepository.findAllForCancellationUpdate(bookingId);
+        // Never partially release a booking if its current seat ownership is inconsistent.
         if (itemCount == 0 || seats.size() != itemCount) {
             throw new BookingNoLongerOwnsSeatsException();
         }
@@ -145,6 +163,7 @@ public class BookingService {
         bookingRepository.save(booking);
         showSeatRepository.saveAllAndFlush(seats);
 
+        // Idempotent retries return above, so only the state-changing request publishes this event.
         eventPublisher.publishEvent(new BookingCancelledEvent(
                 booking.getId(),
                 booking.getCustomerAccountId(),

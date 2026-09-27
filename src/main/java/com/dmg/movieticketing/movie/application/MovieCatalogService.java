@@ -12,6 +12,9 @@ import java.time.Clock;
 import java.util.Locale;
 import java.util.UUID;
 
+/**
+ * Maintains the minimal global movie catalogue and its public search operations.
+ */
 @Service
 public class MovieCatalogService {
 
@@ -48,6 +51,7 @@ public class MovieCatalogService {
         try {
             return movieRepository.saveAndFlush(movie);
         } catch (DataIntegrityViolationException exception) {
+            // Preserve one error contract when concurrent requests pass the pre-check together.
             throw new MovieAlreadyExistsException(exception);
         }
     }

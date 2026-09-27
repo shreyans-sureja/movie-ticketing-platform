@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Converts verified JWT claims into the application's account principal and role authority.
+ */
 @Component
 public class JwtToAccountAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
@@ -32,4 +35,3 @@ public class JwtToAccountAuthenticationConverter implements Converter<Jwt, Abstr
         return methods == null || methods.isEmpty() ? "unknown" : methods.getFirst();
     }
 }
-

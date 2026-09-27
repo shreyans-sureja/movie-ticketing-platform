@@ -121,6 +121,7 @@ public class Booking {
         return cancelledAt;
     }
 
+    /** Applies the only supported post-confirmation state transition. */
     public void cancel(Instant cancelledAt) {
         if (status != BookingStatus.CONFIRMED) {
             throw new IllegalStateException("Only a confirmed booking can be cancelled.");

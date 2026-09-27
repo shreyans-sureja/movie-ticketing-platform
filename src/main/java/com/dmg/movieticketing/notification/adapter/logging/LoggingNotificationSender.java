@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+/**
+ * Development adapter that represents successful delivery by writing the message to the log.
+ */
 @Component
 @ConditionalOnProperty(
         prefix = "app.notifications",

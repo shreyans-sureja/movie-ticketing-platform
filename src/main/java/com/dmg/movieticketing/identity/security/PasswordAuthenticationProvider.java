@@ -16,6 +16,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Verifies local account credentials without exposing whether an email is registered or disabled.
+ */
 @Component
 public class PasswordAuthenticationProvider implements AuthenticationProvider {
 
@@ -44,6 +47,7 @@ public class PasswordAuthenticationProvider implements AuthenticationProvider {
         Optional<UserAccount> candidate = accountRepository.findByEmailNormalized(email);
 
         if (candidate.isEmpty()) {
+            // Perform BCrypt work for unknown emails to reduce account-enumeration timing differences.
             passwordEncoder.matches(password, dummyPasswordHash);
             throw new BadCredentialsException("Invalid credentials");
         }
@@ -67,4 +71,3 @@ public class PasswordAuthenticationProvider implements AuthenticationProvider {
         return UsernamePasswordAuthenticationToken.class.isAssignableFrom(authentication);
     }
 }
-

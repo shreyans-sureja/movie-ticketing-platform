@@ -11,6 +11,7 @@ import java.util.UUID;
 
 public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
 
+    /** Loads seats with hold expiry in one query so availability can be derived without N+1 reads. */
     @Query("""
             SELECT new com.dmg.movieticketing.show.application.ShowSeatAvailabilityData(
                 showSeat,
@@ -23,6 +24,10 @@ public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
             """)
     List<ShowSeatAvailabilityData> findAllWithCurrentHoldExpiry(@Param("showId") UUID showId);
 
+    /**
+     * Locks the requested seats in UUID order. Every hold transaction uses this
+     * ordering so overlapping requests serialize without JVM-local locks.
+     */
     @Query(value = """
             SELECT *
             FROM show_seat
@@ -36,6 +41,7 @@ public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
             @Param("showSeatIds") List<UUID> showSeatIds
     );
 
+    /** Locks every seat belonging to a hold before it is converted to a booking. */
     @Query(value = """
             SELECT show_seat.*
             FROM show_seat
@@ -46,6 +52,7 @@ public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
             """, nativeQuery = true)
     List<ShowSeat> findAllForBookingUpdate(@Param("holdId") UUID holdId);
 
+    /** Locks every seat belonging to a booking before an all-or-nothing cancellation. */
     @Query(value = """
             SELECT show_seat.*
             FROM show_seat
@@ -58,6 +65,7 @@ public interface ShowSeatRepository extends JpaRepository<ShowSeat, UUID> {
 
     long countByShowId(UUID showId);
 
+    /** Counts stored AVAILABLE seats plus HELD seats whose persisted hold has expired. */
     @Query("""
             SELECT COUNT(showSeat)
             FROM ShowSeat showSeat

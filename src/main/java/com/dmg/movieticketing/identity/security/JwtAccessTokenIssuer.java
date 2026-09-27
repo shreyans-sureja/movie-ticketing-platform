@@ -15,6 +15,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Issues short-lived HS256 JWTs containing only the account identity and role needed by the API.
+ */
 @Component
 public class JwtAccessTokenIssuer implements AccessTokenIssuer {
 

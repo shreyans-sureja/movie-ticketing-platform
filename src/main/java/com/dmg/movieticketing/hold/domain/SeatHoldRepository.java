@@ -16,6 +16,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, UUID> {
     @EntityGraph(attributePaths = "show")
     Optional<SeatHold> findByIdAndCustomerAccountId(UUID id, UUID customerAccountId);
 
+    /** Locks an owner-scoped hold to serialize concurrent confirmation attempts. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT hold

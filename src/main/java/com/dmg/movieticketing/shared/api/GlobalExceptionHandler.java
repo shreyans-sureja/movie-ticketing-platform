@@ -39,6 +39,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import java.util.Comparator;
 import java.util.List;
 
+/** Maps validation and domain failures to the API's stable problem-details contract. */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

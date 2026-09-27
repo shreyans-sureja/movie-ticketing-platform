@@ -39,6 +39,7 @@ public class BookingItem {
         this.id = new BookingItemId(booking.getId(), showSeat.getId());
         this.booking = booking;
         this.showSeat = showSeat;
+        // Preserve the confirmed unit price even if show-seat data is changed in a later phase.
         this.unitPrice = showSeat.getPrice();
     }
 

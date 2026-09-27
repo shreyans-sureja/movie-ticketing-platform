@@ -23,6 +23,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.time.Clock;
 import java.util.Base64;
 
+/** Configures the shared UTC clock and symmetric JWT encoder/decoder validation. */
 @Configuration
 @EnableConfigurationProperties(JwtProperties.class)
 public class JwtConfiguration {

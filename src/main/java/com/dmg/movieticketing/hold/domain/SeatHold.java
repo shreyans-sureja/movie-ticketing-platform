@@ -79,6 +79,7 @@ public class SeatHold {
         return expiresAt;
     }
 
+    /** A hold is expired at its exact expiry instant; the interval is end-exclusive. */
     public boolean isActiveAt(Instant instant) {
         return instant.isBefore(expiresAt);
     }

@@ -8,6 +8,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
+/**
+ * Maps booking events to provider-neutral messages and contains delivery failures.
+ */
 @Service
 public class NotificationService {
 
@@ -31,6 +34,7 @@ public class NotificationService {
                     event.seatCount()
             ));
         } catch (RuntimeException exception) {
+            // Booking state is already committed; provider failures are observable but never propagated.
             logFailure(NotificationType.BOOKING_CONFIRMED, event.bookingId(), exception);
         }
     }
@@ -48,6 +52,7 @@ public class NotificationService {
                     event.seatCount()
             ));
         } catch (RuntimeException exception) {
+            // Keep cancellation responses successful even when the selected adapter is unavailable.
             logFailure(NotificationType.BOOKING_CANCELLED, event.bookingId(), exception);
         }
     }

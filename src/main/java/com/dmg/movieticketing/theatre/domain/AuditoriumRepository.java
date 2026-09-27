@@ -17,6 +17,9 @@ public interface AuditoriumRepository extends JpaRepository<Auditorium, UUID> {
 
     Optional<Auditorium> findByIdAndTheatreId(UUID id, UUID theatreId);
 
+    /**
+     * Locks the auditorium row used as the database serialization point for show overlap checks.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT auditorium

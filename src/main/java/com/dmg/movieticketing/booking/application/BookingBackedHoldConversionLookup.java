@@ -6,6 +6,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
+/**
+ * Synchronous PostgreSQL-backed implementation of the hold conversion lookup.
+ * It participates in the caller's existing transaction and opens no transaction of its own.
+ */
 @Component
 public class BookingBackedHoldConversionLookup implements HoldConversionLookup {
 

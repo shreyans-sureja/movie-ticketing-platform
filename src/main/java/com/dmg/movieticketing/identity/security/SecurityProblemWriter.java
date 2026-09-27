@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 
+/** Writes the same problem-details format for failures raised inside Spring Security filters. */
 @Component
 public class SecurityProblemWriter {
 
@@ -73,4 +74,3 @@ public class SecurityProblemWriter {
         return false;
     }
 }
-
