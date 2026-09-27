@@ -196,3 +196,29 @@
 
 > Please add code documentation for easy understanding. Add concise java doc for important implementation do not add on obvious getters and setters etc. Add small inline comments on important and not obvious code choices.
 > Do not modify any code for this.
+
+## Prompt 27
+
+> Let's create a single command API demo script for this project.  It should include important system behaviours.
+>
+> Access control behaviour for theatre admin and users.
+>
+> Concurrency tests for hold, booking and cancellation behaviour.
+> Retry on the same booking confirmation.
+> Idempotency behaviour
+> Cancellation behaviour should make seat available again.
+>
+> Also add cases which I miss.
+
+## Prompt 28
+
+> please add hold=expiry verification.
+>
+> BOOKING_HOLD_DURATION= PT5S
+> add a new expiry scenarios using unused show seat. customer hold the seat, verify the seat is hold, wait till expiry, verify that seat is available again for hold, and verify original hold can not be confirmed as booking and return the correct conflict response.
+>
+> Add appropriate test cases .
+
+## Prompt 29
+
+> revisit the documentation, fix any issues. Update readme if required. Also add one final project HLD and LLD in the documentation which gives overview of the repo.

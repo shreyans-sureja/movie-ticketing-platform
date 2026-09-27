@@ -36,6 +36,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -54,6 +55,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -73,7 +75,7 @@ class MovieAndShowIntegrationTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("app.security.jwt.secret", () -> JWT_SECRET);
-        registry.add("booking.hold-duration", () -> "PT5M");
+        registry.add("booking.hold-duration", () -> "PT5S");
     }
 
     @Autowired
@@ -426,6 +428,89 @@ class MovieAndShowIntegrationTest {
                         .content(holdBody(List.of(seatIds.get(0)))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void expiredHoldReleasesSeatForAnotherCustomerAndCannotBeConfirmed() throws Exception {
+        String adminToken = signupAndSignIn(
+                "/api/v1/auth/admins/signup",
+                "hold-expiry-admin@example.com",
+                "administrator-password"
+        );
+        String firstCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-expiry-one@example.com",
+                "customer-password"
+        );
+        String secondCustomerToken = signupAndSignIn(
+                "/api/v1/auth/customers/signup",
+                "hold-expiry-two@example.com",
+                "customer-password"
+        );
+        String movieId = createMovie(adminToken, "Hold Expiry Film", 120, "en");
+        String theatreId = createTheatre(adminToken, "Hold Expiry Cinema");
+        String auditoriumId = createAuditorium(adminToken, theatreId, "Screen 1");
+        createSeatRow(adminToken, theatreId, auditoriumId, "A", 1, 2, "REGULAR");
+        createSeatRow(adminToken, theatreId, auditoriumId, "B", 1, 1, "PREMIUM");
+        String showId = createShow(
+                adminToken,
+                theatreId,
+                auditoriumId,
+                movieId,
+                Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)
+        );
+        String showSeatId = showSeatIds(showId).get(2);
+
+        String holdResponse = mockMvc.perform(post("/api/v1/shows/{showId}/holds", showId)
+                        .header("Authorization", bearer(firstCustomerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(List.of(showSeatId))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode hold = objectMapper.readTree(holdResponse);
+        String holdId = hold.get("id").asText();
+        Instant createdAt = Instant.parse(hold.get("createdAt").asText());
+        Instant expiresAt = Instant.parse(hold.get("expiresAt").asText());
+        assertThat(Duration.between(createdAt, expiresAt)).isEqualTo(Duration.ofSeconds(5));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[2].showSeatId").value(showSeatId))
+                .andExpect(jsonPath("$.items[2].availability").value("HELD"));
+
+        waitUntilAfter(expiresAt);
+
+        mockMvc.perform(get("/api/v1/holds/{holdId}", holdId)
+                        .header("Authorization", bearer(firstCustomerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EXPIRED"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[2].showSeatId").value(showSeatId))
+                .andExpect(jsonPath("$.items[2].availability").value("AVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableSeatCount").value(3));
+
+        String replacementHoldId = createHold(secondCustomerToken, showId, List.of(showSeatId));
+        assertThat(replacementHoldId).isNotEqualTo(holdId);
+
+        mockMvc.perform(post("/api/v1/holds/{holdId}/booking", holdId)
+                        .header("Authorization", bearer(firstCustomerToken)))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("HOLD_EXPIRED"));
+
+        mockMvc.perform(get("/api/v1/shows/{showId}/seats", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[2].availability").value("HELD"));
+        assertThat(bookingRepository.count()).isZero();
+        assertThat(bookingItemRepository.count()).isZero();
     }
 
     @Test
@@ -881,6 +966,13 @@ class MovieAndShowIntegrationTest {
                 body.path("id").asText(null),
                 body.path("cancelledAt").asText(null)
         );
+    }
+
+    private void waitUntilAfter(Instant instant) throws InterruptedException {
+        long remainingMillis = Duration.between(Instant.now(), instant.plusMillis(250)).toMillis();
+        if (remainingMillis > 0) {
+            Thread.sleep(remainingMillis);
+        }
     }
 
     private List<String> showSeatIds(String showId) throws Exception {

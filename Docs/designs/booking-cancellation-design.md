@@ -401,7 +401,7 @@ An already-cancelled booking is an idempotent success, not an error. Cross-custo
 - Ownership is part of the locking repository query, not a controller-only check after loading by ID.
 - Customer identity comes only from the verified JWT.
 - The API accepts no customer ID or seat list.
-- Responses expose the historical `showSeatId` values required for future booking operations but never physical-seat IDs, internal pointer columns, or another customer's identity.
+- Responses expose the historical `showSeatId` values needed to identify booked seats but never physical-seat IDs, internal pointer columns, or another customer's identity.
 - No payment or refund fields are implied by a `CANCELLED` status.
 
 ## 11. Read-Model Effects

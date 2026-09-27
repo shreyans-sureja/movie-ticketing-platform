@@ -1,7 +1,9 @@
 # Theatre Administration Design
 
-**Status:** Approved and implemented  
-**Last updated:** 2026-09-25
+**Status:** Approved and implemented
+
+**Last updated:** 2026-09-27
+
 **Depends on:** [Identity and Authentication Design](identity-authentication-design.md)
 
 ## 1. Purpose
@@ -50,7 +52,7 @@ In this document, **admin** means a theatre administrator. The canonical account
 - Owner-scoped physical-seat listing.
 - JWT authentication, `THEATRE_ADMIN` role authorization, and ownership checks for theatre resources.
 - Database constraints and transactions for create-time consistency.
-- Flyway schema and seed migrations when implementation is approved.
+- Flyway schema and seed migrations `V2` and `V3`.
 
 ### 4.2 Out of scope
 
@@ -61,7 +63,7 @@ In this document, **admin** means a theatre administrator. The canonical account
 - Multiple owners, delegated theatre managers, or staff permissions.
 - Adding, editing, or deleting cities through an API.
 - Movies, shows, schedules, seat inventory, holds, bookings, and payments.
-- Hold and booking concurrency control. Customer holds are implemented separately against show-specific seat inventory; booking remains undesigned.
+- Hold and booking concurrency control. Those concerns are implemented separately by the [customer seat hold](customer-seat-hold-design.md), [booking confirmation](booking-confirmation-design.md), and [booking cancellation](booking-cancellation-design.md) designs against show-specific inventory.
 - Prices on physical seats, including weekday, weekend, holiday, surge, or show-specific prices.
 - Accessibility attributes. A later independent flag or attribute may mark a seat accessible regardless of its tier.
 - Seat-map images, coordinates, aisles, gaps, and a visual layout editor.
@@ -682,7 +684,7 @@ sequenceDiagram
 
 ## 17. Create-Time Consistency
 
-This management design does not attempt to solve booking concurrency. It does establish clean physical-layout invariants that the later booking design can reference:
+This management design does not solve booking concurrency. It establishes clean physical-layout invariants consumed by the separate hold and booking capabilities:
 
 - A physical seat has a stable UUID.
 - A physical coordinate occurs once per auditorium.
@@ -690,7 +692,7 @@ This management design does not attempt to solve booking concurrency. It does es
 - Concurrent overlapping row requests cannot create duplicates because the database unique constraint is authoritative.
 - A uniqueness failure rolls back the entire row request and returns `409 SEAT_CONFLICT`.
 
-The implemented show-scheduling flow snapshots these stable physical seats into show-specific sellable inventory. The separate [customer seat hold design](customer-seat-hold-design.md) synchronizes on that show inventory, not on `physical_seat`; booking remains a future design.
+The implemented show-scheduling flow snapshots these stable physical seats into show-specific sellable inventory. The [customer seat hold](customer-seat-hold-design.md), [booking confirmation](booking-confirmation-design.md), and [booking cancellation](booking-cancellation-design.md) flows synchronize and transition that show inventory, not `physical_seat`.
 
 ## 18. Error Contract
 

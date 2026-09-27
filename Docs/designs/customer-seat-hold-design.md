@@ -118,7 +118,7 @@ erDiagram
 | `created_at` | `TIMESTAMPTZ` | Required UTC instant captured from the injected clock. |
 | `expires_at` | `TIMESTAMPTZ` | Required UTC instant; strictly later than `created_at`. |
 
-There is no persisted `EXPIRED` state. Expiry is calculated from `expires_at`. Booking-related states are deferred until booking is designed.
+There is no persisted `EXPIRED` state. Expiry is calculated from `expires_at`. The separate [booking confirmation design](booking-confirmation-design.md) derives `CONVERTED` from the existence of a booking for the hold rather than adding mutable hold status.
 
 ### 5.2 `seat_hold_item` table
 
