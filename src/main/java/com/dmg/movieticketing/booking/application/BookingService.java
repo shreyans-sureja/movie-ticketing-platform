@@ -12,6 +12,7 @@ import com.dmg.movieticketing.hold.domain.SeatHoldRepository;
 import com.dmg.movieticketing.show.domain.ShowSeat;
 import com.dmg.movieticketing.show.domain.ShowSeatAvailability;
 import com.dmg.movieticketing.show.domain.ShowSeatRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,19 +33,22 @@ public class BookingService {
     private final BookingRepository bookingRepository;
     private final BookingItemRepository bookingItemRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BookingService(
             SeatHoldRepository seatHoldRepository,
             ShowSeatRepository showSeatRepository,
             BookingRepository bookingRepository,
             BookingItemRepository bookingItemRepository,
-            Clock clock
+            Clock clock,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.seatHoldRepository = seatHoldRepository;
         this.showSeatRepository = showSeatRepository;
         this.bookingRepository = bookingRepository;
         this.bookingItemRepository = bookingItemRepository;
         this.clock = clock;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -97,6 +101,16 @@ public class BookingService {
         seats.forEach(seat -> seat.confirmBooking(booking.getId()));
         showSeatRepository.saveAllAndFlush(seats);
 
+        eventPublisher.publishEvent(new BookingConfirmedEvent(
+                booking.getId(),
+                booking.getCustomerAccountId(),
+                booking.getShowId(),
+                booking.getConfirmedAt(),
+                booking.getTotalAmount(),
+                booking.getCurrency(),
+                items.size()
+        ));
+
         return new BookingConfirmationResult(
                 new BookingDetails(booking, orderForResponse(items)),
                 true
@@ -130,6 +144,17 @@ public class BookingService {
         seats.forEach(ShowSeat::releaseBooking);
         bookingRepository.save(booking);
         showSeatRepository.saveAllAndFlush(seats);
+
+        eventPublisher.publishEvent(new BookingCancelledEvent(
+                booking.getId(),
+                booking.getCustomerAccountId(),
+                booking.getShowId(),
+                booking.getConfirmedAt(),
+                booking.getCancelledAt(),
+                booking.getTotalAmount(),
+                booking.getCurrency(),
+                seats.size()
+        ));
 
         return loadDetails(booking);
     }

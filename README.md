@@ -2,7 +2,7 @@
 
 A Java/Spring Boot backend for a movie-ticketing platform covering multiple cities, theaters, shows, and seat-level booking.
 
-The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, customer booking history, and whole-booking cancellation are implemented. Payments, refunds, and notifications remain future work.
+The repository is being developed one capability at a time as a monolith. Identity, JWT authentication, the public city catalogue, theatre administration, the movie catalogue, show scheduling, show discovery, show-specific seat inventory, temporary customer seat holds, confirmed bookings, customer booking history, whole-booking cancellation, and local booking lifecycle notifications are implemented. Payments, refunds, and external notification delivery remain future work.
 
 ## Implemented scope
 
@@ -44,6 +44,8 @@ The current implementation provides:
 - Customer-owned booking detail and paginated booking history.
 - Atomic, owner-scoped whole-booking cancellation before show start.
 - Idempotent duplicate cancellation with transactional release of every booked show seat.
+- Pluggable confirmation and cancellation notifications through a channel-neutral sender port.
+- Local structured-log delivery after transaction commit, with notification failures isolated from successful booking operations.
 - UTC timestamp storage and an injected UTC `Clock` for application time.
 
 Theatre, auditorium, and physical-seat APIs are intentionally create/list-only. Updates, deletion, deactivation, accessibility attributes, and physical-seat pricing are not implemented. Holds and bookings operate on show-specific seat inventory rather than the physical-seat layout.
@@ -64,13 +66,13 @@ An authenticated customer can convert their own active hold into one `CONFIRMED`
 
 Confirmation is naturally retry-safe. `booking.source_hold_id` is unique, so the first request creates the booking with `201 Created` and a later retry returns the same booking with `200 OK`. A lost HTTP response therefore cannot create a duplicate booking. Booked seats are excluded from public availability and available-seat counts.
 
-Booking detail and history are owner-scoped using the account ID from the verified JWT. History uses deterministic newest-first pagination and calculates seat counts in the page query rather than querying once per booking. See the [booking confirmation design](Docs/designs/booking-confirmation-design.md) for the confirmation transaction and schema invariants.
+Booking detail and history are owner-scoped using the account ID from the verified JWT. History uses deterministic newest-first pagination and calculates seat counts in the page query rather than querying once per booking. A newly confirmed booking publishes one lifecycle event. An explicit `AFTER_COMMIT` transactional listener, with fallback execution disabled, sends the notification through the configured adapter. Idempotent confirmation replays publish no event and send no duplicate notification. See the [booking confirmation design](Docs/designs/booking-confirmation-design.md) for the confirmation transaction and schema invariants, and the [notification flow design](Docs/designs/notification-flow-design.md) for the adapter boundary and failure semantics.
 
 ## Booking cancellation
 
 An authenticated customer can cancel their complete booking while the post-lock UTC cancellation instant is strictly before the show start. Partial cancellation is not supported. The operation locks the owner-scoped booking row and then all of its show seats in stable UUID order. It changes the booking to `CANCELLED`, records `cancelledAt`, releases every seat to `AVAILABLE`, and commits once. Any failure rolls back the complete operation.
 
-Cancellation preserves the booking, items, original prices, confirmation timestamp, and source hold. The source hold remains `CONVERTED`, so a cancelled booking cannot be recreated from the same hold. Duplicate cancellation requests are idempotent and return the same cancelled booking with `200 OK`. Released seats immediately participate in public availability and can be held again. Refunds, payment changes, cancellation reasons, and notifications remain out of scope. See the [booking cancellation design](Docs/designs/booking-cancellation-design.md) for the lock ordering and race analysis.
+Cancellation preserves the booking, items, original prices, confirmation timestamp, and source hold. The source hold remains `CONVERTED`, so a cancelled booking cannot be recreated from the same hold. Duplicate cancellation requests are idempotent and return the same cancelled booking with `200 OK`. Released seats immediately participate in public availability and can be held again. Only the first successful cancellation transition publishes an event; the same after-commit notification path handles it, while cancellation replays send nothing. Refunds, payment changes, and cancellation reasons remain out of scope. See the [booking cancellation design](Docs/designs/booking-cancellation-design.md) for the lock ordering and race analysis.
 
 ## Technology
 
@@ -119,6 +121,9 @@ src/main/java/com/dmg/movieticketing/
 |  |- api/             Confirmation, cancellation, owned detail, and history contracts
 |  |- application/     Locking, confirmation, cancellation, retry, and query use cases
 |  `- domain/          Booking header, items, state, and repositories
+|- notification/
+|  |- application/     After-commit listeners, messages, service, and sender port
+|  `- adapter/logging/ Local structured-log sender
 `- shared/api/         Common problem response handling
 
 src/main/resources/
@@ -153,11 +158,14 @@ export DB_USERNAME=movie_ticketing
 export DB_PASSWORD=movie_ticketing
 export JWT_SECRET="$(openssl rand -base64 32)"
 export BOOKING_HOLD_DURATION=PT5M
+export NOTIFICATION_PROVIDER=logging
 ```
 
 `JWT_SECRET` must be valid Base64 that decodes to at least 32 random bytes. It is required at startup and must not be committed.
 
 `BOOKING_HOLD_DURATION` is a required positive ISO-8601 duration. `PT5M` configures five-minute holds; choose the operational value appropriate for the environment.
+
+`NOTIFICATION_PROVIDER` defaults to `logging`. The current adapter writes structured confirmation and cancellation messages to the application log. An unsupported value intentionally prevents startup because no sender would be configured.
 
 Default JWT settings are:
 
@@ -480,7 +488,7 @@ Cancellation takes no request body and always covers the complete booking. Its f
 - Dynamic show-pricing rules and discount codes.
 - Payments.
 - Partial booking cancellation and refunds.
-- Non-blocking confirmation and reminder notifications.
+- Durable notification delivery, retries, external channels, customer notification history, and reminder notifications.
 
 The assignment continues to exclude a frontend, deployment/containerization, CI/CD, microservices, advanced authentication, and production-grade monitoring.
 
@@ -495,4 +503,5 @@ The assignment continues to exclude a frontend, deployment/containerization, CI/
 - [Customer seat hold design](Docs/designs/customer-seat-hold-design.md)
 - [Booking confirmation design](Docs/designs/booking-confirmation-design.md)
 - [Booking cancellation design](Docs/designs/booking-cancellation-design.md)
+- [Booking lifecycle notification design](Docs/designs/notification-flow-design.md)
 - [Postman API collection](Docs/collection/movie-ticketing-platform.postman_collection.json)

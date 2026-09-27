@@ -33,7 +33,7 @@ This document describes the implemented whole-booking cancellation flow. It exte
 - Cancellation after or exactly at the show start instant.
 - Cancellation fees, policy windows, or configurable cut-off periods before show time.
 - Payments, refunds, credits, wallets, or financial reconciliation.
-- Notifications.
+- Notification logic inside the cancellation transaction; the separate implemented [booking lifecycle notification design](notification-flow-design.md) delivers after commit only for the first successful cancellation transition.
 - Theatre-admin or support-agent cancellation.
 - Reinstating or reconfirming a cancelled booking.
 - Deleting bookings or booking items.
@@ -465,4 +465,4 @@ The implementation follows these approved decisions:
 6. Include cancelled bookings in the existing history order and add nullable `cancelledAt` to detail and summary responses.
 7. Add no cancellation reason, event table, refund fields, status filter, or new index in this phase.
 
-No payment, refund, partial-cancellation, or notification behavior is included.
+No payment, refund, or partial-cancellation behavior is included. Confirmation and cancellation notifications are implemented separately through the after-commit lifecycle-notification flow.

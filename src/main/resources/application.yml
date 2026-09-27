@@ -17,6 +17,8 @@ spring:
           time_zone: UTC
 
 app:
+  notifications:
+    provider: ${NOTIFICATION_PROVIDER:logging}
   security:
     jwt:
       secret: ${JWT_SECRET}

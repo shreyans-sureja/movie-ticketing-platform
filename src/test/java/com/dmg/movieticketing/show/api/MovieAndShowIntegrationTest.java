@@ -8,6 +8,9 @@ import com.dmg.movieticketing.identity.domain.UserAccountRepository;
 import com.dmg.movieticketing.hold.domain.SeatHoldItemRepository;
 import com.dmg.movieticketing.hold.domain.SeatHoldRepository;
 import com.dmg.movieticketing.movie.domain.MovieRepository;
+import com.dmg.movieticketing.notification.application.NotificationMessage;
+import com.dmg.movieticketing.notification.application.NotificationSender;
+import com.dmg.movieticketing.notification.application.NotificationType;
 import com.dmg.movieticketing.show.domain.MovieShowRepository;
 import com.dmg.movieticketing.show.domain.ShowSeatRepository;
 import com.dmg.movieticketing.show.domain.ShowTierPriceRepository;
@@ -26,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -44,6 +48,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -112,6 +120,9 @@ class MovieAndShowIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @MockitoBean
+    private NotificationSender notificationSender;
 
     @BeforeEach
     void clearOperationalData() {
@@ -479,6 +490,10 @@ class MovieAndShowIntegrationTest {
 
     @Test
     void customerConfirmsAndCancelsOwnedBookingWithHistoryAndAvailabilityUpdates() throws Exception {
+        doThrow(new IllegalStateException("notification provider unavailable"))
+                .when(notificationSender)
+                .send(any());
+
         String adminToken = signupAndSignIn(
                 "/api/v1/auth/admins/signup",
                 "booking-admin@example.com",
@@ -641,6 +656,11 @@ class MovieAndShowIntegrationTest {
 
         assertThat(bookingRepository.count()).isEqualTo(1);
         assertThat(bookingItemRepository.count()).isEqualTo(2);
+        var notification = org.mockito.ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(notificationSender, times(2)).send(notification.capture());
+        assertThat(notification.getAllValues())
+                .extracting(NotificationMessage::type)
+                .containsExactly(NotificationType.BOOKING_CONFIRMED, NotificationType.BOOKING_CANCELLED);
     }
 
     @Test
@@ -688,6 +708,9 @@ class MovieAndShowIntegrationTest {
         assertThat(results.get(0).bookingId()).isEqualTo(results.get(1).bookingId());
         assertThat(bookingRepository.count()).isEqualTo(1);
         assertThat(bookingItemRepository.count()).isEqualTo(2);
+        verify(notificationSender, times(1)).send(org.mockito.ArgumentMatchers.argThat(
+                message -> message.type() == NotificationType.BOOKING_CONFIRMED
+        ));
     }
 
     @Test
@@ -752,6 +775,12 @@ class MovieAndShowIntegrationTest {
         );
         assertThat(availableSeats).isEqualTo(3);
         assertThat(bookingItemRepository.count()).isEqualTo(2);
+        verify(notificationSender, times(1)).send(org.mockito.ArgumentMatchers.argThat(
+                message -> message.type() == NotificationType.BOOKING_CONFIRMED
+        ));
+        verify(notificationSender, times(1)).send(org.mockito.ArgumentMatchers.argThat(
+                message -> message.type() == NotificationType.BOOKING_CANCELLED
+        ));
     }
 
     private List<Integer> createShowsConcurrently(
