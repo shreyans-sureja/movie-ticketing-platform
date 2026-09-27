@@ -22,24 +22,10 @@ public class LoggingNotificationSender implements NotificationSender {
 
     @Override
     public void send(NotificationMessage notification) {
-        var log = LOGGER.atInfo()
-                .addKeyValue("event", "booking_notification_sent")
-                .addKeyValue("notificationType", notification.type())
-                .addKeyValue("bookingId", notification.bookingId())
-                .addKeyValue("customerAccountId", notification.customerAccountId())
-                .addKeyValue("showId", notification.showId())
-                .addKeyValue("totalAmount", notification.totalAmount())
-                .addKeyValue("currency", notification.currency())
-                .addKeyValue("seatCount", notification.seatCount())
-                .addKeyValue("provider", "local-log");
-
-        if (notification instanceof BookingConfirmedNotification confirmed) {
-            log.addKeyValue("confirmedAt", confirmed.confirmedAt());
-        } else if (notification instanceof BookingCancelledNotification cancelled) {
-            log.addKeyValue("confirmedAt", cancelled.confirmedAt())
-                    .addKeyValue("cancelledAt", cancelled.cancelledAt());
-        }
-
-        log.log("Booking lifecycle notification delivered to local logging adapter.");
+        LOGGER.info(
+                "Booking lifecycle notification delivered: type={}, details={}",
+                notification.type(),
+                notification
+        );
     }
 }
